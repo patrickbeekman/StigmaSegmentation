@@ -1,0 +1,7 @@
+my_stigma_locations/
+stigma_locations/
+data/
+datasets/
+stigma_locations.zip
+.idea/
+__pycache__/
