@@ -25,7 +25,7 @@ def main():
     stigma_center = pd.read_json("stigma_locations/stigma_locations.json").T
     # segment_images()
     # transform_data()
-    # build_model()
+    build_model()
     test_model()
     pass
 
@@ -171,6 +171,10 @@ def build_model():
             pass
         print("[%d] appended %s, curr size is %d" % (count-1, name, (len(positive)+len(negative))))
 
+    # oversample (with replacement) the positive class to be twice as large
+    oversample_index = np.random.choice(list(range(len(positive))), len(positive)*4)
+    positive = np.concatenate((positive, positive[oversample_index]))
+
     print("creating Train and Test sets")
     X_train = np.concatenate((positive, negative))
     y_train = np.array([1]*len(positive) + [0]*len(negative))
@@ -179,7 +183,6 @@ def build_model():
     # shuffle the data
     X_train, y_train = shuffle(X_train, y_train)
     X_test, y_test = shuffle(X_test, y_test)
-    print(y_train[:30])
 
     print("starting to build and train model")
     # create
@@ -189,7 +192,7 @@ def build_model():
     model.add(Dropout(rate=0.6))
     model.add(Dense(1, activation='sigmoid'))
 
-    model.compile(optimizer='sgd',#Adam(lr=0.0001, decay=10**-6),
+    model.compile(optimizer=Adam(lr=0.0001, decay=10**-6),
                   loss='binary_crossentropy',
                   metrics=['accuracy'])#, precision, recall])
 
@@ -247,7 +250,7 @@ def test_model():
     locations = []
     ife = InceptionFeatureExtractor()
 
-    im = io.imread("my_stigma_locations/20.06.18_3403289_pos2_kurz/104MEDIA/Y0020859.jpg")
+    im = io.imread("my_stigma_locations/02.07.18_3403289_pos2_kurz/178MEDIA/Y0190578.jpg")
     # cycle through all 200x200 images
     for i in np.arange(0, im.shape[0] - win_size, stride):  # x direction
         for j in np.arange(0, im.shape[1] - win_size, stride):  # y direction
@@ -280,7 +283,7 @@ def test_model():
     fig, ax = plt.subplots(1)
     ax.imshow(im)
     for r in np.where(y_pred > .5)[0]:
-        rect = patches.Rectangle(locations[int(r)], size, size, linewidth=3, edgecolor='r', facecolor='none')
+        rect = patches.Rectangle((locations[int(r)][1], locations[int(r)][0]), size, size, linewidth=3, edgecolor='r', facecolor='none')
         ax.add_patch(rect)
     plt.show()
     print("hi")
