@@ -5,3 +5,4 @@ datasets/
 stigma_locations.zip
 .idea/
 __pycache__/
+*.png

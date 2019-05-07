@@ -8,9 +8,9 @@ import os
 from keras.applications.resnet50 import ResNet50
 from keras import Sequential
 from keras.models import load_model
-from keras.layers import Flatten, Dense, Dropout
+from keras.layers import Flatten, Dense, Dropout, regularizers
 from tensorflow.python.keras import backend
-from sklearn.utils import shuffle
+from sklearn.utils import shuffle, class_weight
 import tensorflow as tf
 from image_extract import InceptionFeatureExtractor
 import keras_metrics as km
@@ -42,7 +42,7 @@ def segment_images(count_num=0, stig=1):
     count = count_num
 
     for stigma in stigma_center.iterrows():
-        if count > 20:
+        if count > 50:
             break
         # if count == 9: # idk broken folder?
         #     count+=1
@@ -79,7 +79,7 @@ def transform_data():
     size = 100
 
     for stigma in stigma_center.iterrows():
-        if count > 20:
+        if count > 50:
             break
         # if count == 9:
         #     count +=1
@@ -139,7 +139,7 @@ def build_model():
     n_test = None
     count = 0
     for stigma in stigma_center.iterrows():
-        if count > 20:
+        if count > 50:
             break
         # if count == 9:
         #     count += 1
@@ -147,7 +147,7 @@ def build_model():
         count+=1
         stigma = stigma[1]
         name = stigma.name[:-4].replace('/','@')
-        if count <= 15: # use samples 0-15 for training
+        if count <= 41: # use samples 0-42 for training
             if positive is None:
                 positive = np.load(open("data/%s_positive.npy" % name, "rb"))
             else:
@@ -157,7 +157,7 @@ def build_model():
             else:
                 for f in glob.glob("data/%s_negative*" % name):
                     negative = np.concatenate((negative, np.load(open(f, "rb")))) # "data/%s_negative.npy" % name
-        elif count <= 20: # use samples 16-20 for testing
+        elif count <= 50: # use samples 43-50 for testing
             if p_test is None:
                 p_test = np.load(open("data/%s_positive.npy" % name, "rb"))
             else:
@@ -179,23 +179,25 @@ def build_model():
     # shuffle the data
     X_train, y_train = shuffle(X_train, y_train)
     X_test, y_test = shuffle(X_test, y_test)
+    print(y_train[:30])
 
     print("starting to build and train model")
     # create
     model = Sequential()
     # model.add(Flatten(input_shape=X_train.shape[1:]))
-    model.add(Dense(2048, activation='relu'))
-    model.add(Dropout(0.5))
+    model.add(Dense(2048, activation='relu', kernel_regularizer=regularizers.l2(0.0001)))
+    model.add(Dropout(rate=0.6))
     model.add(Dense(1, activation='sigmoid'))
 
-    model.compile(optimizer=Adam(lr=0.0001),
+    model.compile(optimizer='sgd',#Adam(lr=0.0001, decay=10**-6),
                   loss='binary_crossentropy',
-                  metrics=['accuracy'])
+                  metrics=['accuracy'])#, precision, recall])
 
     history = model.fit(X_train, y_train,
-              epochs=50,
-              batch_size=50,
-              validation_data=(X_test, y_test))
+              epochs=60,
+              batch_size=60,
+              validation_data=(X_test, y_test),
+              sample_weight=class_weight.compute_sample_weight('balanced', y_train))
 
     # Creates a HDF5 file 'my_model.h5'
     model.save('data/my_model.h5')
@@ -209,6 +211,33 @@ def build_model():
     plt.show()
     plt.clf()
 
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('Model loss')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.legend(['Train', 'Test'], loc='upper left')
+    plt.show()
+    plt.clf()
+
+    # plt.plot(history.history['precision'])
+    # plt.plot(history.history['val_precision'])
+    # plt.title('Model precision score')
+    # plt.ylabel('Precision')
+    # plt.xlabel('Epoch')
+    # plt.legend(['Train', 'Test'], loc='upper left')
+    # plt.show()
+    # plt.clf()
+    #
+    # plt.plot(history.history['recall'])
+    # plt.plot(history.history['val_recall'])
+    # plt.title('Model recall score')
+    # plt.ylabel('Recall')
+    # plt.xlabel('Epoch')
+    # plt.legend(['Train', 'Test'], loc='upper left')
+    # plt.show()
+    # plt.clf()
+
 
 def test_model():
     stride = 50
@@ -218,7 +247,7 @@ def test_model():
     locations = []
     ife = InceptionFeatureExtractor()
 
-    im = io.imread("my_stigma_locations/30.06.18_1654305_pos6_kurz/170MEDIA/Y0181620.jpg")
+    im = io.imread("my_stigma_locations/20.06.18_3403289_pos2_kurz/104MEDIA/Y0020859.jpg")
     # cycle through all 200x200 images
     for i in np.arange(0, im.shape[0] - win_size, stride):  # x direction
         for j in np.arange(0, im.shape[1] - win_size, stride):  # y direction
@@ -242,13 +271,17 @@ def test_model():
         else:
             y_pred = np.concatenate((y_pred, model.predict(ife.transform(my_X=X[i*size:i*size+size]))))
 
-    stigma_location = locations[int(np.median(np.where(y_pred > .6)[0]))]
+    try:
+        stigma_location = locations[int(np.median(np.where(y_pred > .5)[0]))]
+    except ValueError:
+        stigma_location = (0, 0)
     # plot the location as a square
     print("stigma top left loc:", stigma_location)
     fig, ax = plt.subplots(1)
     ax.imshow(im)
-    rect = patches.Rectangle(stigma_location, size, size, linewidth=3, edgecolor='r', facecolor='none')
-    ax.add_patch(rect)
+    for r in np.where(y_pred > .5)[0]:
+        rect = patches.Rectangle(locations[int(r)], size, size, linewidth=3, edgecolor='r', facecolor='none')
+        ax.add_patch(rect)
     plt.show()
     print("hi")
 
