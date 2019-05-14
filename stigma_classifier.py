@@ -9,13 +9,18 @@ from keras.applications.resnet50 import ResNet50
 from keras import Sequential
 from keras.models import load_model
 from keras.layers import Flatten, Dense, Dropout, regularizers
-from tensorflow.python.keras import backend
+from sklearn.metrics import mean_squared_error
+from tensorflow.python.keras import backend, Input, Model
 from sklearn.utils import shuffle, class_weight
 import tensorflow as tf
+from tensorflow.python.keras.callbacks import TensorBoard
+from tensorflow.python.keras.layers import Conv2D, MaxPooling2D, UpSampling2D
+
 from image_extract import InceptionFeatureExtractor
 import keras_metrics as km
 import glob
 import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
 stigma_center = None
 
@@ -23,10 +28,13 @@ stigma_center = None
 def main():
     global stigma_center
     stigma_center = pd.read_json("stigma_locations/stigma_locations.json").T
+    if not os.path.isdir("data"):
+        os.mkdir("data")
     # segment_images()
     # transform_data()
-    build_model()
-    test_model()
+    # build_model()
+    build_autoencoder()
+    # test_model()
     pass
 
 
@@ -151,7 +159,7 @@ def build_model():
             if positive is None:
                 positive = np.load(open("data/%s_positive.npy" % name, "rb"))
             else:
-                positive = np.concatenate((positive, np.load(open("data/%s_positive.npy" % name, "rb")))) 
+                positive = np.concatenate((positive, np.load(open("data/%s_positive.npy" % name, "rb"))))
             if negative is None:
                 negative = np.load(open("data/%s_negative[0].npy" % name, "rb"))
             else:
@@ -161,7 +169,7 @@ def build_model():
             if p_test is None:
                 p_test = np.load(open("data/%s_positive.npy" % name, "rb"))
             else:
-                p_test = np.concatenate((p_test, np.load(open("data/%s_positive.npy" % name, "rb")))) 
+                p_test = np.concatenate((p_test, np.load(open("data/%s_positive.npy" % name, "rb"))))
             if n_test is None:
                 n_test = np.load(open("data/%s_negative[0].npy" % name, "rb"))
             else:
@@ -185,9 +193,7 @@ def build_model():
     X_test, y_test = shuffle(X_test, y_test)
 
     print("starting to build and train model")
-    # create
     model = Sequential()
-    # model.add(Flatten(input_shape=X_train.shape[1:]))
     model.add(Dense(2048, activation='relu', kernel_regularizer=regularizers.l2(0.0001)))
     model.add(Dropout(rate=0.6))
     model.add(Dense(1, activation='sigmoid'))
@@ -240,6 +246,109 @@ def build_model():
     # plt.legend(['Train', 'Test'], loc='upper left')
     # plt.show()
     # plt.clf()
+
+
+def build_autoencoder():
+    global stigma_center
+    stop = 25
+    positive = None
+    p_test = None
+    n_test = None
+    count = 0
+    for stigma in stigma_center.iterrows():
+        if count > stop:
+            break
+        # if count == 9:
+        #     count += 1
+        #     continue
+        count+=1
+        stigma = stigma[1]
+        pos_path = 'my_stigma_locations/' + stigma.name[:stigma.name.rfind("/")] + "/positive/"
+        neg_path = 'my_stigma_locations/' + stigma.name[:stigma.name.rfind("/")] + "/negative/"
+        if count <= int(stop*.85): # use samples 0-42 for training
+            for im in os.listdir(pos_path):
+                if positive is None:
+                    positive = np.array([io.imread(pos_path + im)])
+                else:
+                    positive = np.concatenate((positive, np.array([io.imread(pos_path + im)])))
+        elif count <= stop: # use samples 43-50 for testing
+            for im in os.listdir(pos_path):
+                if p_test is None:
+                    p_test = np.array([io.imread(pos_path + im)])
+                else:
+                    p_test = np.concatenate((p_test, np.array([io.imread(pos_path + im)])))
+            for im in os.listdir(neg_path):
+                try:
+                    if n_test is None:
+                        n_test = np.array([io.imread(neg_path + im)])
+                    else:
+                        n_test = np.concatenate((n_test, np.array([io.imread(pos_path + im)])))
+                except FileNotFoundError:
+                    continue
+        else: # validation
+            pass
+        print("[%d] appended %s, curr size is %d" % (count-1, stigma.name, (len(positive))))
+
+    print(positive.shape)
+    print(p_test.shape)
+
+    input_img = Input(shape=(200, 200, 3))  # adapt this if using `channels_first` image data format
+
+    x = Conv2D(32, (7, 7), activation='relu', padding='same')(input_img)
+    x = MaxPooling2D((2, 2), padding='same')(x)
+    x = Conv2D(16, (3, 3), activation='relu', padding='same')(x)
+    x = MaxPooling2D((2, 2), padding='same')(x)
+    x = Conv2D(8, (3, 3), activation='relu', padding='same')(x)
+    encoded = MaxPooling2D((2, 2), padding='same')(x)
+
+    # at this point the representation is (25,25,3)
+
+    x = Conv2D(8, (3, 3), activation='relu', padding='same')(encoded)
+    x = UpSampling2D((2, 2))(x)
+    x = Conv2D(16, (3, 3), activation='relu', padding='same')(x)
+    x = UpSampling2D((2, 2))(x)
+    x = Conv2D(32, (7, 7), activation='relu', padding='same')(x)
+    x = UpSampling2D((2, 2))(x)
+    decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(x)
+
+    autoencoder = Model(input_img, decoded)
+    autoencoder.compile(optimizer='adam', loss='mean_squared_error')
+
+    autoencoder.fit(positive, positive,
+                    epochs=20,
+                    batch_size=20,
+                    shuffle=True,
+                    validation_data=(p_test, p_test),
+                    verbose=2,
+                    callbacks=[TensorBoard(log_dir='/tmp/autoencoder')])
+
+    autoencoder.save("data/autoencoder.h5")
+
+    positive_mse = mean_squared_error(positive.reshape(len(positive), -1), autoencoder.predict(positive).reshape(len(positive), -1),
+                                      multioutput='raw_values')
+    p_test_mse = mean_squared_error(p_test.reshape(len(p_test), -1), autoencoder.predict(p_test).reshape(len(p_test), -1),
+                                      multioutput='raw_values')
+    n_test_mse = mean_squared_error(n_test.reshape(len(n_test), -1), autoencoder.predict(n_test).reshape(len(n_test), -1),
+                                      multioutput='raw_values')
+
+    print("positive", positive_mse.mean())
+    print("p_test", p_test_mse.mean())
+    print("n_test", n_test_mse.mean())
+
+    plt.hist(positive_mse, bins=20)
+    plt.title("positive_mse %.02f" % positive_mse.mean())
+    plt.show()
+    plt.clf()
+
+    plt.hist(p_test_mse, bins=20)
+    plt.title("p_test_mse %.02f" % p_test_mse.mean())
+    plt.show()
+    plt.clf()
+
+    plt.hist(n_test_mse, bins=20)
+    plt.title("n_test_mse %.02f" % n_test_mse.mean())
+    plt.show()
+    plt.clf()
 
 
 def test_model():
