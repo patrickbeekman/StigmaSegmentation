@@ -6,15 +6,16 @@ from skimage import io
 # from PIL import Image
 import os
 from keras.applications.resnet50 import ResNet50
-from keras import Sequential
+from keras import Sequential, Input, Model
 from keras.models import load_model
-from keras.layers import Flatten, Dense, Dropout, regularizers
+from keras.layers import Flatten, Dense, Dropout, regularizers, Conv2D, MaxPooling2D, UpSampling2D
+from skimage.transform import resize
 from sklearn.metrics import mean_squared_error
-from tensorflow.python.keras import backend, Input, Model
+from tensorflow.python.keras import backend
 from sklearn.utils import shuffle, class_weight
 import tensorflow as tf
 from tensorflow.python.keras.callbacks import TensorBoard
-from tensorflow.python.keras.layers import Conv2D, MaxPooling2D, UpSampling2D
+#from tensorflow.python.keras.layers import Conv2D, MaxPooling2D, UpSampling2D
 
 from image_extract import InceptionFeatureExtractor
 import keras_metrics as km
@@ -50,7 +51,7 @@ def segment_images(count_num=0, stig=1):
     count = count_num
 
     for stigma in stigma_center.iterrows():
-        if count > 50:
+        if count > 47:
             break
         # if count == 9: # idk broken folder?
         #     count+=1
@@ -70,7 +71,7 @@ def segment_images(count_num=0, stig=1):
             for j in np.arange(0, im.shape[1]-win_size, stride): # y direction
                 # if the center pixel is considered a stigma then save positive example
                 curr_im = im[i:i+win_size, j:j+win_size]
-                if j + half_size >= stigma.start[0] and j + half_size <= stigma.end[0] and i + half_size >= stigma.start[1] and i + half_size <= stigma.end[1]:
+                if j + half_size >= stigma.start[0]+50 and j + half_size <= stigma.end[0]+50 and i + half_size >= stigma.start[1]-50 and i + half_size <= stigma.end[1]-50:
                     io.imsave("my_stigma_locations/" + stigma.name[:stigma.name.rfind("/")] + "/positive" + stigma.name[stigma.name.rfind("/"):][:-4] + "(i=%dj=%d).png" % (i,j), curr_im)
                 else:
                     io.imsave("my_stigma_locations/" + stigma.name[:stigma.name.rfind("/")] + "/negative" + stigma.name[stigma.name.rfind("/"):][:-4] + "(i=%dj=%d).png" % (i,j), curr_im)
@@ -87,7 +88,7 @@ def transform_data():
     size = 100
 
     for stigma in stigma_center.iterrows():
-        if count > 50:
+        if count > 47:
             break
         # if count == 9:
         #     count +=1
@@ -147,7 +148,7 @@ def build_model():
     n_test = None
     count = 0
     for stigma in stigma_center.iterrows():
-        if count > 50:
+        if count > 47:
             break
         # if count == 9:
         #     count += 1
@@ -155,7 +156,7 @@ def build_model():
         count+=1
         stigma = stigma[1]
         name = stigma.name[:-4].replace('/','@')
-        if count <= 41: # use samples 0-42 for training
+        if count <= 40: # use samples 0-42 for training
             if positive is None:
                 positive = np.load(open("data/%s_positive.npy" % name, "rb"))
             else:
@@ -165,7 +166,7 @@ def build_model():
             else:
                 for f in glob.glob("data/%s_negative*" % name):
                     negative = np.concatenate((negative, np.load(open(f, "rb")))) # "data/%s_negative.npy" % name
-        elif count <= 50: # use samples 43-50 for testing
+        elif count <= 47: # use samples 43-50 for testing
             if p_test is None:
                 p_test = np.load(open("data/%s_positive.npy" % name, "rb"))
             else:
@@ -247,11 +248,11 @@ def build_model():
     # plt.show()
     # plt.clf()
 
-
 def build_autoencoder():
     global stigma_center
     stop = 25
     positive = None
+    negative = None
     p_test = None
     n_test = None
     count = 0
@@ -268,46 +269,86 @@ def build_autoencoder():
         if count <= int(stop*.85): # use samples 0-42 for training
             for im in os.listdir(pos_path):
                 if positive is None:
-                    positive = np.array([io.imread(pos_path + im)])
+                    positive = np.array([resize(io.imread(pos_path + im), output_shape=(64,64,3))])
                 else:
-                    positive = np.concatenate((positive, np.array([io.imread(pos_path + im)])))
+                    positive = np.concatenate((positive, np.array([resize(io.imread(pos_path + im), output_shape=(64,64,3))])))
         elif count <= stop: # use samples 43-50 for testing
             for im in os.listdir(pos_path):
                 if p_test is None:
-                    p_test = np.array([io.imread(pos_path + im)])
+                    p_test = np.array([resize(io.imread(pos_path + im), output_shape=(64,64,3))])
                 else:
-                    p_test = np.concatenate((p_test, np.array([io.imread(pos_path + im)])))
+                    p_test = np.concatenate((p_test, np.array([resize(io.imread(pos_path + im), output_shape=(64,64,3))])))
             for im in os.listdir(neg_path):
                 try:
                     if n_test is None:
-                        n_test = np.array([io.imread(neg_path + im)])
+                        n_test = np.array([resize(io.imread(neg_path + im), output_shape=(64,64,3))])
                     else:
-                        n_test = np.concatenate((n_test, np.array([io.imread(pos_path + im)])))
+                        n_test = np.concatenate((n_test, np.array([resize(io.imread(neg_path + im), output_shape=(64,64,3))])))
                 except FileNotFoundError:
                     continue
         else: # validation
             pass
         print("[%d] appended %s, curr size is %d" % (count-1, stigma.name, (len(positive))))
 
-    print(positive.shape)
-    print(p_test.shape)
+    # root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive/"
+    # for im in os.listdir(root_path):
+    #     if positive is None:
+    #         positive = np.array([io.imread(root_path + im)])
+    #     else:
+    #         positive = np.concatenate((positive, np.array([io.imread(root_path + im)])))
+    # root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/negative/"
+    # count = 0
+    # for im in os.listdir(root_path):
+    #     if count > 1500:
+    #         break
+    #     if negative is None:
+    #         negative = np.array([io.imread(root_path + im)])
+    #     else:
+    #         negative = np.concatenate((negative, np.array([io.imread(root_path + im)])))
+    #     count+=1
 
-    input_img = Input(shape=(200, 200, 3))  # adapt this if using `channels_first` image data format
+    print("positive_shape:", positive.shape)
+    # print("negative_shape:", negative.shape)
+    # print(p_test.shape)
 
-    x = Conv2D(32, (7, 7), activation='relu', padding='same')(input_img)
+    # positive = np.apply_along_axis(my_resize, 0, positive)
+    # p_test = np.apply_along_axis(my_resize, 0, p_test)
+    #
+    # print(positive.shape)
+    # print(p_test.shape)
+
+    #in_out_shape = positive.shape[1] * positive.shape[2] * positive.shape[3]
+
+    # positive = positive.astype('float32') / 255
+    # # negative = negative.astype('float32') / 255
+    # p_test = p_test.astype('float32') / 255
+    # n_test = n_test.astype('float32') / 255
+    #positive = positive.reshape((len(positive), -1))
+    # p_test = p_test.reshape((len(p_test), -1))
+
+    input_img = Input(shape=(64,64,3))  # adapt this if using `channels_first` image data format
+
+    # hidden_1 = Dense(4096, activation='tanh')(input_img)
+    # hidden_2 = Dense(2048, activation='tanh')(hidden_1)
+    # code = Dense(1024, activation='tanh')(hidden_2)
+    # hidden_3 = Dense(2048, activation='tanh')(code)
+    # hidden_4 = Dense(4096, activation='tanh')(hidden_3)
+    # decoded = Dense(in_out_shape, activation='sigmoid')(hidden_4)
+
+    x = Conv2D(32, (7, 7), activation='tanh', padding='same')(input_img)
     x = MaxPooling2D((2, 2), padding='same')(x)
-    x = Conv2D(16, (3, 3), activation='relu', padding='same')(x)
+    x = Conv2D(16, (5, 5), activation='tanh', padding='same')(x)
     x = MaxPooling2D((2, 2), padding='same')(x)
-    x = Conv2D(8, (3, 3), activation='relu', padding='same')(x)
+    x = Conv2D(8, (3, 3), activation='tanh', padding='same')(x)
     encoded = MaxPooling2D((2, 2), padding='same')(x)
 
     # at this point the representation is (25,25,3)
 
-    x = Conv2D(8, (3, 3), activation='relu', padding='same')(encoded)
+    x = Conv2D(8, (3, 3), activation='tanh', padding='same')(encoded)
     x = UpSampling2D((2, 2))(x)
-    x = Conv2D(16, (3, 3), activation='relu', padding='same')(x)
+    x = Conv2D(16, (5, 5), activation='tanh', padding='same')(x)
     x = UpSampling2D((2, 2))(x)
-    x = Conv2D(32, (7, 7), activation='relu', padding='same')(x)
+    x = Conv2D(32, (7, 7), activation='tanh', padding='same')(x)
     x = UpSampling2D((2, 2))(x)
     decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(x)
 
@@ -315,7 +356,7 @@ def build_autoencoder():
     autoencoder.compile(optimizer='adam', loss='mean_squared_error')
 
     autoencoder.fit(positive, positive,
-                    epochs=20,
+                    epochs=35,
                     batch_size=20,
                     shuffle=True,
                     validation_data=(p_test, p_test),
@@ -323,23 +364,37 @@ def build_autoencoder():
                     callbacks=[TensorBoard(log_dir='/tmp/autoencoder')])
 
     autoencoder.save("data/autoencoder.h5")
+    # autoencoder.load_weights("data/autoencoder.h5")
 
     positive_mse = mean_squared_error(positive.reshape(len(positive), -1), autoencoder.predict(positive).reshape(len(positive), -1),
                                       multioutput='raw_values')
+    # negative_mse = mean_squared_error(negative.reshape(len(negative), -1), autoencoder.predict(negative).reshape(len(negative), -1),
+    #                                   multioutput='raw_values')
     p_test_mse = mean_squared_error(p_test.reshape(len(p_test), -1), autoencoder.predict(p_test).reshape(len(p_test), -1),
                                       multioutput='raw_values')
     n_test_mse = mean_squared_error(n_test.reshape(len(n_test), -1), autoencoder.predict(n_test).reshape(len(n_test), -1),
                                       multioutput='raw_values')
 
     print("positive", positive_mse.mean())
+    # print("negative", negative_mse.mean())
     print("p_test", p_test_mse.mean())
     print("n_test", n_test_mse.mean())
+
+    fig, ax = plt.subplots()
+    ax.boxplot([positive_mse, p_test_mse, n_test_mse], positions=np.array(range(3))+1, labels=['positive', 'p_test', 'n_test'], meanline=True)
+    plt.show()
+    plt.clf()
 
     plt.hist(positive_mse, bins=20)
     plt.title("positive_mse %.02f" % positive_mse.mean())
     plt.show()
     plt.clf()
 
+    # plt.hist(negative_mse, bins=20)
+    # plt.title("negative_mse %.02f" % negative_mse.mean())
+    # plt.show()
+    # plt.clf()
+    #
     plt.hist(p_test_mse, bins=20)
     plt.title("p_test_mse %.02f" % p_test_mse.mean())
     plt.show()
