@@ -8,7 +8,7 @@ import os
 from keras.applications.resnet50 import ResNet50
 from keras import Sequential, Input, Model
 from keras.models import load_model
-from keras.layers import Flatten, Dense, Dropout, regularizers, Conv2D, MaxPooling2D, UpSampling2D
+from keras.layers import Flatten, Dense, Dropout, regularizers, Conv2D, MaxPooling2D, UpSampling2D, BatchNormalization
 from skimage.transform import resize
 from sklearn.metrics import mean_squared_error
 from tensorflow.python.keras import backend
@@ -256,6 +256,8 @@ def build_autoencoder():
     p_test = None
     n_test = None
     count = 0
+    im_size = 64
+
     for stigma in stigma_center.iterrows():
         if count > stop:
             break
@@ -266,24 +268,24 @@ def build_autoencoder():
         stigma = stigma[1]
         pos_path = 'my_stigma_locations/' + stigma.name[:stigma.name.rfind("/")] + "/positive/"
         neg_path = 'my_stigma_locations/' + stigma.name[:stigma.name.rfind("/")] + "/negative/"
-        if count <= int(stop*.85): # use samples 0-42 for training
+        if count <= int(stop*.93): # use samples 0-42 for training
             for im in os.listdir(pos_path):
                 if positive is None:
-                    positive = np.array([resize(io.imread(pos_path + im), output_shape=(64,64,3))])
+                    positive = np.array([resize(io.imread(pos_path + im), output_shape=(im_size,im_size,3))])
                 else:
-                    positive = np.concatenate((positive, np.array([resize(io.imread(pos_path + im), output_shape=(64,64,3))])))
+                    positive = np.concatenate((positive, np.array([resize(io.imread(pos_path + im), output_shape=(im_size,im_size,3))])))
         elif count <= stop: # use samples 43-50 for testing
             for im in os.listdir(pos_path):
                 if p_test is None:
-                    p_test = np.array([resize(io.imread(pos_path + im), output_shape=(64,64,3))])
+                    p_test = np.array([resize(io.imread(pos_path + im), output_shape=(im_size,im_size,3))])
                 else:
-                    p_test = np.concatenate((p_test, np.array([resize(io.imread(pos_path + im), output_shape=(64,64,3))])))
+                    p_test = np.concatenate((p_test, np.array([resize(io.imread(pos_path + im), output_shape=(im_size,im_size,3))])))
             for im in os.listdir(neg_path):
                 try:
                     if n_test is None:
-                        n_test = np.array([resize(io.imread(neg_path + im), output_shape=(64,64,3))])
+                        n_test = np.array([resize(io.imread(neg_path + im), output_shape=(im_size,im_size,3))])
                     else:
-                        n_test = np.concatenate((n_test, np.array([resize(io.imread(neg_path + im), output_shape=(64,64,3))])))
+                        n_test = np.concatenate((n_test, np.array([resize(io.imread(neg_path + im), output_shape=(im_size,im_size,3))])))
                 except FileNotFoundError:
                     continue
         else: # validation
@@ -326,7 +328,7 @@ def build_autoencoder():
     #positive = positive.reshape((len(positive), -1))
     # p_test = p_test.reshape((len(p_test), -1))
 
-    input_img = Input(shape=(64,64,3))  # adapt this if using `channels_first` image data format
+    input_img = Input(shape=(im_size,im_size,3))  # adapt this if using `channels_first` image data format
 
     # hidden_1 = Dense(4096, activation='tanh')(input_img)
     # hidden_2 = Dense(2048, activation='tanh')(hidden_1)
@@ -335,6 +337,7 @@ def build_autoencoder():
     # hidden_4 = Dense(4096, activation='tanh')(hidden_3)
     # decoded = Dense(in_out_shape, activation='sigmoid')(hidden_4)
 
+    # ENCODER
     x = Conv2D(32, (7, 7), activation='tanh', padding='same')(input_img)
     x = MaxPooling2D((2, 2), padding='same')(x)
     x = Conv2D(16, (5, 5), activation='tanh', padding='same')(x)
@@ -344,6 +347,7 @@ def build_autoencoder():
 
     # at this point the representation is (25,25,3)
 
+    # DECODER
     x = Conv2D(8, (3, 3), activation='tanh', padding='same')(encoded)
     x = UpSampling2D((2, 2))(x)
     x = Conv2D(16, (5, 5), activation='tanh', padding='same')(x)
@@ -366,44 +370,71 @@ def build_autoencoder():
     autoencoder.save("data/autoencoder.h5")
     # autoencoder.load_weights("data/autoencoder.h5")
 
-    positive_mse = mean_squared_error(positive.reshape(len(positive), -1), autoencoder.predict(positive).reshape(len(positive), -1),
-                                      multioutput='raw_values')
-    # negative_mse = mean_squared_error(negative.reshape(len(negative), -1), autoencoder.predict(negative).reshape(len(negative), -1),
+    # positive_mse = mean_squared_error(positive.reshape(len(positive), -1), autoencoder.predict(positive).reshape(len(positive), -1),
     #                                   multioutput='raw_values')
-    p_test_mse = mean_squared_error(p_test.reshape(len(p_test), -1), autoencoder.predict(p_test).reshape(len(p_test), -1),
-                                      multioutput='raw_values')
-    n_test_mse = mean_squared_error(n_test.reshape(len(n_test), -1), autoencoder.predict(n_test).reshape(len(n_test), -1),
-                                      multioutput='raw_values')
+    # # negative_mse = mean_squared_error(negative.reshape(len(negative), -1), autoencoder.predict(negative).reshape(len(negative), -1),
+    # #                                   multioutput='raw_values')
+    # p_test_mse = mean_squared_error(p_test.reshape(len(p_test), -1), autoencoder.predict(p_test).reshape(len(p_test), -1),
+    #                                   multioutput='raw_values')
+    # n_test_mse = mean_squared_error(n_test.reshape(len(n_test), -1), autoencoder.predict(n_test).reshape(len(n_test), -1),
+    #                                   multioutput='raw_values')
 
-    print("positive", positive_mse.mean())
+
+    # Residual Sum of Squares
+    pred_pos = autoencoder.predict(positive)
+    RSS_pos = ((positive - pred_pos) ** 2).sum(axis=(1,2,3))
+    pred_p_test = autoencoder.predict(p_test)
+    RSS_p_test = ((p_test - pred_p_test) ** 2).sum(axis=(1,2,3))
+    pred_n_test = autoencoder.predict(n_test)
+    RSS_n_test = ((n_test - pred_n_test) ** 2).sum(axis=(1,2,3))
+
+    print("positive", RSS_pos.mean())
     # print("negative", negative_mse.mean())
-    print("p_test", p_test_mse.mean())
-    print("n_test", n_test_mse.mean())
+    print("p_test", RSS_p_test.mean())
+    print("n_test", RSS_n_test.mean())
 
     fig, ax = plt.subplots()
-    ax.boxplot([positive_mse, p_test_mse, n_test_mse], positions=np.array(range(3))+1, labels=['positive', 'p_test', 'n_test'], meanline=True)
+    ax.boxplot([RSS_pos, RSS_p_test, RSS_n_test], positions=np.array(range(3))+1, labels=['positive', 'p_test', 'n_test'], meanline=True)
     plt.show()
     plt.clf()
 
-    plt.hist(positive_mse, bins=20)
-    plt.title("positive_mse %.02f" % positive_mse.mean())
-    plt.show()
-    plt.clf()
+    # I want to be able to find a threshold that maximizes the amount of examples correctly classified
+
+    best_acc = 0
+    threshold = RSS_n_test.min()
+    for t in np.arange(int(RSS_n_test.min()), int(RSS_p_test.max()), .5):
+        positive_acc = (RSS_pos <= t).sum() / len(RSS_pos)
+        p_test_acc = (RSS_p_test <= t).sum() / len(RSS_p_test)
+        n_test_acc = (RSS_n_test > t).sum() / len(RSS_n_test)
+        acc = (positive_acc + p_test_acc) / 2 * n_test_acc
+        if acc > best_acc:
+            best_acc = acc
+            threshold = t
+    print("Done finding best split: Best ACC=%.02f   with threshold=%.01f" % (best_acc, threshold))
+    positive_acc = (RSS_pos <= threshold).sum() / len(RSS_pos)
+    p_test_acc = (RSS_p_test <= threshold).sum() / len(RSS_p_test)
+    n_test_acc = (RSS_n_test > threshold).sum() / len(RSS_n_test)
+    print("positive_acc=%.03f\np_test_acc=%.03f\nn_test_acc=%.03f" % (positive_acc, p_test_acc, n_test_acc))
+
+    # plt.hist(positive_mse, bins=20)
+    # plt.title("positive_mse %.02f" % positive_mse.mean())
+    # plt.show()
+    # plt.clf()
 
     # plt.hist(negative_mse, bins=20)
     # plt.title("negative_mse %.02f" % negative_mse.mean())
     # plt.show()
     # plt.clf()
     #
-    plt.hist(p_test_mse, bins=20)
-    plt.title("p_test_mse %.02f" % p_test_mse.mean())
-    plt.show()
-    plt.clf()
-
-    plt.hist(n_test_mse, bins=20)
-    plt.title("n_test_mse %.02f" % n_test_mse.mean())
-    plt.show()
-    plt.clf()
+    # plt.hist(p_test_mse, bins=20)
+    # plt.title("p_test_mse %.02f" % p_test_mse.mean())
+    # plt.show()
+    # plt.clf()
+    #
+    # plt.hist(n_test_mse, bins=20)
+    # plt.title("n_test_mse %.02f" % n_test_mse.mean())
+    # plt.show()
+    # plt.clf()
 
 
 def test_model():
