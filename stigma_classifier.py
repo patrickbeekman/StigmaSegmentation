@@ -9,6 +9,7 @@ from keras.applications.resnet50 import ResNet50
 from keras import Sequential, Input, Model
 from keras.models import load_model
 from keras.layers import Flatten, Dense, Dropout, regularizers, Conv2D, MaxPooling2D, UpSampling2D, BatchNormalization
+from skimage.color import rgb2hsv
 from skimage.transform import resize
 from sklearn.metrics import mean_squared_error
 from tensorflow.python.keras import backend
@@ -271,21 +272,21 @@ def build_autoencoder():
         if count <= int(stop*.93): # use samples 0-42 for training
             for im in os.listdir(pos_path):
                 if positive is None:
-                    positive = np.array([resize(io.imread(pos_path + im), output_shape=(im_size,im_size,3))])
+                    positive = np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])
                 else:
-                    positive = np.concatenate((positive, np.array([resize(io.imread(pos_path + im), output_shape=(im_size,im_size,3))])))
+                    positive = np.concatenate((positive, np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])))
         elif count <= stop: # use samples 43-50 for testing
             for im in os.listdir(pos_path):
                 if p_test is None:
-                    p_test = np.array([resize(io.imread(pos_path + im), output_shape=(im_size,im_size,3))])
+                    p_test = np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])
                 else:
-                    p_test = np.concatenate((p_test, np.array([resize(io.imread(pos_path + im), output_shape=(im_size,im_size,3))])))
+                    p_test = np.concatenate((p_test, np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])))
             for im in os.listdir(neg_path):
                 try:
                     if n_test is None:
-                        n_test = np.array([resize(io.imread(neg_path + im), output_shape=(im_size,im_size,3))])
+                        n_test = np.array([resize(rgb2hsv(io.imread(neg_path + im)), output_shape=(im_size,im_size,3))])
                     else:
-                        n_test = np.concatenate((n_test, np.array([resize(io.imread(neg_path + im), output_shape=(im_size,im_size,3))])))
+                        n_test = np.concatenate((n_test, np.array([resize(rgb2hsv(io.imread(neg_path + im)), output_shape=(im_size,im_size,3))])))
                 except FileNotFoundError:
                     continue
         else: # validation
@@ -338,21 +339,21 @@ def build_autoencoder():
     # decoded = Dense(in_out_shape, activation='sigmoid')(hidden_4)
 
     # ENCODER
-    x = Conv2D(32, (7, 7), activation='tanh', padding='same')(input_img)
+    x = Conv2D(64, (7, 7), activation='tanh', padding='same')(input_img)
     x = MaxPooling2D((2, 2), padding='same')(x)
-    x = Conv2D(16, (5, 5), activation='tanh', padding='same')(x)
+    x = Conv2D(32, (5, 5), activation='tanh', padding='same')(x)
     x = MaxPooling2D((2, 2), padding='same')(x)
-    x = Conv2D(8, (3, 3), activation='tanh', padding='same')(x)
+    x = Conv2D(16, (3, 3), activation='tanh', padding='same')(x)
     encoded = MaxPooling2D((2, 2), padding='same')(x)
 
     # at this point the representation is (25,25,3)
 
     # DECODER
-    x = Conv2D(8, (3, 3), activation='tanh', padding='same')(encoded)
+    x = Conv2D(16, (3, 3), activation='tanh', padding='same')(encoded)
     x = UpSampling2D((2, 2))(x)
-    x = Conv2D(16, (5, 5), activation='tanh', padding='same')(x)
+    x = Conv2D(32, (5, 5), activation='tanh', padding='same')(x)
     x = UpSampling2D((2, 2))(x)
-    x = Conv2D(32, (7, 7), activation='tanh', padding='same')(x)
+    x = Conv2D(64, (7, 7), activation='tanh', padding='same')(x)
     x = UpSampling2D((2, 2))(x)
     decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(x)
 
@@ -380,6 +381,13 @@ def build_autoencoder():
     #                                   multioutput='raw_values')
 
 
+    '''
+    Done finding best split: Best ACC=0.72   with threshold=23.5
+    positive_acc=0.836
+    p_test_acc=0.943
+    n_test_acc=0.808
+    '''
+
     # Residual Sum of Squares
     pred_pos = autoencoder.predict(positive)
     RSS_pos = ((positive - pred_pos) ** 2).sum(axis=(1,2,3))
@@ -392,13 +400,6 @@ def build_autoencoder():
     # print("negative", negative_mse.mean())
     print("p_test", RSS_p_test.mean())
     print("n_test", RSS_n_test.mean())
-
-    fig, ax = plt.subplots()
-    ax.boxplot([RSS_pos, RSS_p_test, RSS_n_test], positions=np.array(range(3))+1, labels=['positive', 'p_test', 'n_test'], meanline=True)
-    plt.show()
-    plt.clf()
-
-    # I want to be able to find a threshold that maximizes the amount of examples correctly classified
 
     best_acc = 0
     threshold = RSS_n_test.min()
@@ -415,6 +416,12 @@ def build_autoencoder():
     p_test_acc = (RSS_p_test <= threshold).sum() / len(RSS_p_test)
     n_test_acc = (RSS_n_test > threshold).sum() / len(RSS_n_test)
     print("positive_acc=%.03f\np_test_acc=%.03f\nn_test_acc=%.03f" % (positive_acc, p_test_acc, n_test_acc))
+
+    fig, ax = plt.subplots()
+    ax.boxplot([RSS_pos, RSS_p_test, RSS_n_test], positions=np.array(range(3))+1, labels=['positive', 'p_test', 'n_test'], meanline=True)
+    plt.title("RSS reconstruction errors: total acc=%.03f, pos=%.02f,\np_test=%.02f, n_test=%.02f, thresh=%.01f" % (best_acc, positive_acc, p_test_acc, n_test_acc, threshold))
+    plt.show()
+    plt.clf()
 
     # plt.hist(positive_mse, bins=20)
     # plt.title("positive_mse %.02f" % positive_mse.mean())
