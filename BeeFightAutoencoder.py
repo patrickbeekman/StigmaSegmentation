@@ -104,6 +104,8 @@ def build_autoencoder():
     p_test = p_test / 255
     negative = negative / 255
 
+    hyper_param_tuning(positive, p_test, negative)
+
     input_img = Input(shape=(im_size,im_size, 3))  # adapt this if using `channels_first` image data format
 
     # hidden_1 = Dense(4096, activation='tanh')(input_img)
@@ -262,39 +264,40 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
 
     params_1 = {
               "conv_1_layers": [8, 16, 32, 64, 128, 256, 512],
-              "conv_1_filter": [3, 5, 7],
-              "num_epochs": [25, 50, 75, 100],
-              "batch_size": [15, 20, 30, 50, 60],
-              "optimizer": ['adam', 'adadelta', 'sgd'],
-              "learning_rate": [.1, .01, .001, .0001, .00001]
+              "conv_1_filter": [3, 5],
+              "num_epochs": [50, 100],
+              "batch_size": [15, 20, 50],
+              "optimizer": [Adam],
+              "learning_rate": [.1, .01, .001, .0001]
               }
 
     params_2 = {
               "conv_1_layers": [8, 16, 32, 64, 128, 256, 512],
-              "conv_1_filter": [3, 5, 7],
+              "conv_1_filter": [3, 5],
               "conv_2_layers": [8, 16, 32, 64, 128, 256, 512],
-              "conv_2_filter": [3, 5, 7],
-              "num_epochs": [25, 50, 75, 100],
-              "batch_size": [15, 20, 30, 50, 60],
-              "optimizer": ['adam', 'adadelta', 'sgd'],
-              "learning_rate": [.1, .01, .001, .0001, .00001]
+              "conv_2_filter": [3, 5],
+              "num_epochs": [50, 100],
+              "batch_size": [15, 30],
+              "optimizer": [Adam],
+              "learning_rate": [.1, .01, .001, .0001]
               }
 
     params_3 = {
               "conv_1_layers": [8, 16, 32, 64, 128, 256, 512],
-              "conv_1_filter": [3, 5, 7],
-              "conv_2_layers": [8, 16, 32, 64, 128, 256, 512],
-              "conv_2_filter": [3, 5, 7],
-              "conv_3_layers": [8, 16, 32, 64, 128, 256, 512],
-              "conv_3_filter": [3, 5, 7],
-              "num_epochs": [25, 50, 75, 100],
-              "batch_size": [15, 20, 30, 50, 60],
-              "optimizer": [Adam, Adadelta, SGD],
-              "learning_rate": [.1, .01, .001, .0001, .00001]
+              "conv_1_filter": [3, 5],
+              "conv_2_layers": [8, 16, 32, 64, 128, 256],
+              "conv_2_filter": [3, 5],
+              "conv_3_layers": [8, 16, 32, 64, 128, 256],
+              "conv_3_filter": [3, 5],
+              "num_epochs": [50,100],
+              "batch_size": [15, 30],
+              "optimizer": [Adam],
+              "learning_rate": [.1, .01, .001, .0001]
               }
 
     count = 0
     param_1_len = len(ParameterGrid(params_1))
+    print("-------" * 2 + "Model 1" + "-------" * 2)
     for params in ParameterGrid(params_1):
         decoded = model_1(input_img, params)
         autoencoder = Model(input_img, decoded)
@@ -303,6 +306,7 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
                         epochs=params['num_epochs'],
                         batch_size=params['batch_size'],
                         shuffle=True,
+                        verbose=0,
                         validation_data=(pos_test, pos_test))
         curr_acc = calculate_RSS(autoencoder, pos_train, pos_test, neg_test)
         print("(%d/%d) Model_1: %.03f Params:" % (count, param_1_len, curr_acc), params)
@@ -314,6 +318,7 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
 
     count = 0
     param_2_len = len(ParameterGrid(params_2))
+    print("-------" * 2 + "Model 2" + "-------" * 2)
     for params in ParameterGrid(params_2):
         decoded = model_2(input_img, params)
         autoencoder = Model(input_img, decoded)
@@ -322,6 +327,7 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
                         epochs=params['num_epochs'],
                         batch_size=params['batch_size'],
                         shuffle=True,
+                        verbose=0,
                         validation_data=(pos_test, pos_test))
         curr_acc = calculate_RSS(autoencoder, pos_train, pos_test, neg_test)
         print("(%d/%d) Model_2: %.03f Params:" % (count, param_2_len, curr_acc), params)
@@ -333,6 +339,7 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
 
     count = 0
     param_3_len = len(ParameterGrid(params_3))
+    print("-------" * 2 + "Model 3" + "-------" * 2)
     for params in ParameterGrid(params_3):
         decoded = model_3(input_img, params)
         autoencoder = Model(input_img, decoded)
@@ -341,6 +348,7 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
                         epochs=params['num_epochs'],
                         batch_size=params['batch_size'],
                         shuffle=True,
+                        verbose=0,
                         validation_data=(pos_test, pos_test))
         curr_acc = calculate_RSS(autoencoder, pos_train, pos_test, neg_test)
         print("(%d/%d) Model_3: %.03f Params:" % (count, param_3_len, curr_acc), params)
@@ -351,6 +359,7 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
             best_model = "model_3"
 
     print("Best Cumulative Accuracy: %.03f\nBest model: %s\nBest params:" % (best_score, best_model), best_params)
+    print("yooooo")
     pass
 
 
