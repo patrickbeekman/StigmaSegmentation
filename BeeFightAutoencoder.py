@@ -21,13 +21,54 @@ from tensorflow.python.keras.callbacks import TensorBoard
 import matplotlib.pyplot as plt
 
 
-def build_autoencoder():
-    global stigma_center
-    stop = 25
+def load_data():
     positive = None
     negative = None
     p_test = None
     n_test = None
+
+    root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive_sm/"
+    for im in os.listdir(root_path):
+        if positive is None:
+            positive = np.array([io.imread(root_path + im)])
+        else:
+            positive = np.concatenate((positive, np.array([io.imread(root_path + im)])))
+    #positive = positive.reshape((positive.shape[0], positive.shape[1], positive.shape[2], 1))
+
+    root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_testing/positive_sm/"
+    for im in os.listdir(root_path):
+        if p_test is None:
+            p_test = np.array([io.imread(root_path + im)])
+        else:
+            p_test = np.concatenate((p_test, np.array([io.imread(root_path + im)])))
+    #p_test = p_test.reshape((p_test.shape[0], p_test.shape[1], p_test.shape[2], 1))
+
+    root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/negative_sm/"
+    # neg_images = os.listdir(root_path)
+    # neg_sample = np.array(neg_images)[sample_without_replacement(len(neg_images), 1500, random_state=0)]
+    for im in os.listdir(root_path):
+        if negative is None:
+            negative = np.array([io.imread(root_path + im)])
+        else:
+            negative = np.concatenate((negative, np.array([io.imread(root_path + im)])))
+    # negative = negative.reshape((negative.shape[0], negative.shape[1], negative.shape[2], 1))
+    print("positive_shape:", positive.shape)
+
+    rot = [90, 180, 270]
+    pos2 = positive.copy()
+    for i, im in enumerate(pos2):
+        pos2[i] = rotate(im, angle=rot[i%3])
+    positive = np.concatenate((positive, pos2))
+
+    positive = positive / 255
+    p_test = p_test / 255
+    negative = negative / 255
+    return positive, p_test, negative
+
+
+def build_autoencoder():
+    global stigma_center
+    stop = 25
     count = 0
     im_size = 40
 
@@ -67,46 +108,9 @@ def build_autoencoder():
     #positive = positive.reshape((len(positive), -1))
     # p_test = p_test.reshape((len(p_test), -1))
 
-    root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive_sm/"
-    for im in os.listdir(root_path):
-        if positive is None:
-            positive = np.array([io.imread(root_path + im)])
-        else:
-            positive = np.concatenate((positive, np.array([io.imread(root_path + im)])))
-    #positive = positive.reshape((positive.shape[0], positive.shape[1], positive.shape[2], 1))
+    pos_train, pos_test, neg_test = load_data()
 
-    root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_testing/positive_sm/"
-    for im in os.listdir(root_path):
-        if p_test is None:
-            p_test = np.array([io.imread(root_path + im)])
-        else:
-            p_test = np.concatenate((p_test, np.array([io.imread(root_path + im)])))
-    #p_test = p_test.reshape((p_test.shape[0], p_test.shape[1], p_test.shape[2], 1))
-
-    root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/negative_sm/"
-    # neg_images = os.listdir(root_path)
-    # neg_sample = np.array(neg_images)[sample_without_replacement(len(neg_images), 1500, random_state=0)]
-    for im in os.listdir(root_path):
-        if negative is None:
-            negative = np.array([io.imread(root_path + im)])
-        else:
-            negative = np.concatenate((negative, np.array([io.imread(root_path + im)])))
-    # negative = negative.reshape((negative.shape[0], negative.shape[1], negative.shape[2], 1))
-    print("positive_shape:", positive.shape)
-
-    rot = [90, 180, 270]
-    pos2 = positive.copy()
-    for i, im in enumerate(pos2):
-        pos2[i] = rotate(im, angle=rot[i%3])
-    positive = np.concatenate((positive, pos2))
-
-    positive = positive / 255
-    p_test = p_test / 255
-    negative = negative / 255
-
-    hyper_param_tuning(positive, p_test, negative)
-
-    input_img = Input(shape=(im_size,im_size, 3))  # adapt this if using `channels_first` image data format
+    hyper_param_tuning(pos_train, pos_test, neg_test)
 
     # hidden_1 = Dense(4096, activation='tanh')(input_img)
     # hidden_2 = Dense(2048, activation='tanh')(hidden_1)
@@ -114,6 +118,8 @@ def build_autoencoder():
     # hidden_3 = Dense(2048, activation='tanh')(code)
     # hidden_4 = Dense(4096, activation='tanh')(hidden_3)
     # decoded = Dense(in_out_shape, activation='sigmoid')(hidden_4)
+
+    input_img = Input(shape=(im_size,im_size, 3))  # adapt this if using `channels_first` image data format
 
     # ENCODER
     x = Conv2D(32, (5, 5), activation='tanh', padding='same')(input_img)
@@ -135,36 +141,36 @@ def build_autoencoder():
     autoencoder = Model(input_img, decoded)
     autoencoder.compile(optimizer='adam', loss='mean_squared_error')
 
-    autoencoder.fit(positive, positive,
+    autoencoder.fit(pos_train, pos_train,
                     epochs=50,
                     batch_size=20,
                     shuffle=True,
-                    validation_data=(p_test, p_test),
+                    validation_data=(pos_test, pos_test),
                     verbose=2,
                     callbacks=[TensorBoard(log_dir='/tmp/autoencoder')])
 
     autoencoder.save("data/autoencoder.h5")
     # autoencoder.load_weights("data/autoencoder.h5")
 
-    pos_pred = autoencoder.predict(positive)
-    neg_pred = autoencoder.predict(negative)
+    pos_pred = autoencoder.predict(pos_train)
+    neg_pred = autoencoder.predict(neg_test)
 
-    io.imshow(positive[15])#.reshape((80,80)), cmap='gray')
+    io.imshow(pos_train[15])#.reshape((80,80)), cmap='gray')
     io.show()
     io.imshow(pos_pred[15])#.reshape((80,80)), cmap='gray')
     io.show()
-    io.imshow(negative[15])#.reshape((80,80)), cmap='gray')
+    io.imshow(neg_test[15])#.reshape((80,80)), cmap='gray')
     io.show()
     io.imshow(neg_pred[15])#.reshape((80,80)), cmap='gray')
     io.show()
 
     # Residual Sum of Squares
-    pred_pos = autoencoder.predict(positive)
-    RSS_pos = ((positive - pred_pos) ** 2).sum(axis=(1,2,3))
-    pred_p_test = autoencoder.predict(p_test)
-    RSS_p_test = ((p_test - pred_p_test) ** 2).sum(axis=(1,2,3))
-    pred_neg = autoencoder.predict(negative)
-    RSS_neg = ((negative - pred_neg) ** 2).sum(axis=(1,2,3))
+    pred_pos = autoencoder.predict(pos_train)
+    RSS_pos = ((pos_train - pred_pos) ** 2).sum(axis=(1,2,3))
+    pred_p_test = autoencoder.predict(pos_test)
+    RSS_p_test = ((pos_test - pred_p_test) ** 2).sum(axis=(1,2,3))
+    pred_neg = autoencoder.predict(neg_test)
+    RSS_neg = ((neg_test - pred_neg) ** 2).sum(axis=(1,2,3))
 
     print("positive", RSS_pos.mean())
     # print("negative", negative_mse.mean())
@@ -185,37 +191,60 @@ def build_autoencoder():
     positive_acc = (RSS_pos <= threshold).sum() / len(RSS_pos)
     p_test_acc = (RSS_p_test <= threshold).sum() / len(RSS_p_test)
     negative_acc = (RSS_neg > threshold).sum() / len(RSS_neg)
-    print("positive_acc=%.03f\np_test_acc=%.03f\nn_test_acc=%.03f" % (positive_acc, p_test_acc, negative_acc))
+    print("pos_train_acc=%.03f\npos_test_acc=%.03f\nneg_test_acc=%.03f" % (positive_acc, p_test_acc, negative_acc))
 
     fig, ax = plt.subplots()
-    ax.boxplot([RSS_pos, RSS_p_test, RSS_neg], positions=np.array(range(3))+1, labels=['positive', 'pos_test', 'neg_test'], meanline=True)
-    plt.title("RSS reconstruction errors: total acc=%.03f, pos=%.02f,\np_test=%.02f, n_test=%.02f, thresh=%.01f" % (best_acc, positive_acc, p_test_acc, negative_acc, threshold))
+    ax.boxplot([RSS_pos, RSS_p_test, RSS_neg], positions=np.array(range(3))+1, labels=['pos_train', 'pos_test', 'neg_test'], meanline=True)
+    plt.title("RSS reconstruction errors: total acc=%.03f, pos_train=%.02f,\npos_test=%.02f, neg_test=%.02f, thresh=%.01f" % (best_acc, positive_acc, p_test_acc, negative_acc, threshold))
     plt.show()
     plt.clf()
 
     print("yo")
 
-    # plt.hist(positive_mse, bins=20)
-    # plt.title("positive_mse %.02f" % positive_mse.mean())
-    # plt.show()
-    # plt.clf()
 
-    # plt.hist(negative_mse, bins=20)
-    # plt.title("negative_mse %.02f" % negative_mse.mean())
-    # plt.show()
-    # plt.clf()
-    #
-    # plt.hist(p_test_mse, bins=20)
-    # plt.title("p_test_mse %.02f" % p_test_mse.mean())
-    # plt.show()
-    # plt.clf()
-    #
-    # plt.hist(n_test_mse, bins=20)
-    # plt.title("n_test_mse %.02f" % n_test_mse.mean())
-    # plt.show()
-    # plt.clf()
+def autoencode_fully_connected():
+    pos_train, pos_test, neg_test = load_data()
 
+    input_img = Input(shape=(40, 40, 3))  # adapt this if using `channels_first` image data format
 
+    # ENCODER
+    x = Conv2D(32, (5, 5), activation='tanh', padding='same')(input_img)
+    x = MaxPooling2D((2, 2), padding='same')(x)
+    # x = Conv2D(16, (3, 3), activation='tanh', padding='same')(x)
+    # x = MaxPooling2D((2, 2), padding='same')(x)
+    # x = Conv2D(32, (3, 3), activation='tanh', padding='same')(x)
+    # encoded = MaxPooling2D((2, 2), padding='same')(x)
+
+    # DECODER
+    # x = Conv2D(32, (3, 3), activation='tanh', padding='same')(encoded)
+    # x = UpSampling2D((2, 2))(x)
+    # x = Conv2D(16, (3, 3), activation='tanh', padding='same')(x)
+    # x = UpSampling2D((2, 2))(x)
+    x = Conv2D(32, (5, 5), activation='tanh', padding='same')(x)
+    x = UpSampling2D((2, 2))(x)
+    decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(x)
+
+    autoencoder = Model(input_img, decoded)
+    autoencoder.compile(optimizer=Adam(lr=0.01), loss='mean_squared_error')
+
+    train_history = autoencoder.fit(pos_train, pos_train,
+                                    epochs=100,
+                                    batch_size=20,
+                                    shuffle=True,
+                                    validation_data=(pos_test, pos_test),
+                                    verbose=2,
+                                    callbacks=[TensorBoard(log_dir='/tmp/autoencoder')])
+    autoencoder.save_weights('autoencoder.h5')
+
+    loss = train_history.history['loss']
+    val_loss = train_history.history['val_loss']
+    epochs = range(100)
+    plt.figure()
+    plt.plot(epochs, loss, 'bo', label='Training loss')
+    plt.plot(epochs, val_loss, 'b', label='Validation loss')
+    plt.title('Training and validation loss')
+    plt.legend()
+    plt.show()
 
 # NEXT STEP: Change this model to be like the datacamp example with encoder and fully connected for classification
 # I should decide on a scoring metric? Mae
@@ -252,8 +281,6 @@ def calculate_RSS(autoencoder, pos_train, pos_test, neg_test):
             best_acc = acc
             threshold = t
     return best_acc
-    pass
-
 
 def hyper_param_tuning(pos_train, pos_test, neg_test):
     im_size = 40
@@ -263,12 +290,12 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
     best_model = ""
 
     params_1 = {
-              "conv_1_layers": [8, 16, 32, 64, 128, 256, 512],
+              "conv_1_layers": [8, 16, 32, 64, 128],
               "conv_1_filter": [3, 5],
-              "num_epochs": [50, 100],
+              "num_epochs": [100],
               "batch_size": [15, 20, 50],
               "optimizer": [Adam],
-              "learning_rate": [.1, .01, .001, .0001]
+              "learning_rate": [.01, .001, .0001]
               }
 
     params_2 = {
@@ -276,10 +303,10 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
               "conv_1_filter": [3, 5],
               "conv_2_layers": [8, 16, 32, 64, 128, 256, 512],
               "conv_2_filter": [3, 5],
-              "num_epochs": [50, 100],
+              "num_epochs": [100],
               "batch_size": [15, 30],
               "optimizer": [Adam],
-              "learning_rate": [.1, .01, .001, .0001]
+              "learning_rate": [.01, .001, .0001]
               }
 
     params_3 = {
@@ -289,10 +316,10 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
               "conv_2_filter": [3, 5],
               "conv_3_layers": [8, 16, 32, 64, 128, 256],
               "conv_3_filter": [3, 5],
-              "num_epochs": [50,100],
+              "num_epochs": [100],
               "batch_size": [15, 30],
               "optimizer": [Adam],
-              "learning_rate": [.1, .01, .001, .0001]
+              "learning_rate": [.01, .001, .0001]
               }
 
     count = 0
