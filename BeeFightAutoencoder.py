@@ -258,8 +258,8 @@ def autoencode_params(params=None):
     val_loss = train_history.history['val_loss']
     epochs = range(params['num_epochs'])
     plt.figure()
-    plt.plot(epochs, loss, 'o', label='Training loss')
-    plt.plot(epochs, val_loss, 'b', label='Validation loss')
+    plt.plot(epochs, loss, 'g--', label='Training loss')
+    plt.plot(epochs, val_loss, 'm', label='Validation loss')
     plt.title('Training and validation loss')
     plt.legend()
     plt.show()
@@ -282,7 +282,7 @@ def autoencode_fully_connected(params):
     x = MaxPooling2D((2, 2), padding='same')(x)
 
     flat = Flatten()(x)
-    den = Dense(6400, activation='relu', kernel_regularizer=regularizers.l2(0.01))(flat)
+    den = Dense(500, activation='relu', kernel_regularizer=regularizers.l2(0.01))(flat)
     out = Dense(2, activation='softmax')(den)
 
     full_model = Model(input_img, out)
@@ -293,7 +293,7 @@ def autoencode_fully_connected(params):
     for layer in full_model.layers[0:5]:
         layer.trainable = False
     # compile and train the model
-    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(), metrics=['accuracy'])
+    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.0001), metrics=['accuracy'])
     train_history = full_model.fit(np.concatenate((pos_train, neg_train)), to_categorical(np.array([1]*len(pos_train) + [0]*len(neg_train)), 2),
                                    epochs=params['num_epochs'],
                                    batch_size=params['batch_size'],
@@ -307,8 +307,8 @@ def autoencode_fully_connected(params):
     val_loss = train_history.history['val_loss']
     epochs = range(params['num_epochs'])
     plt.figure()
-    plt.plot(epochs, loss, 'o', label='Training loss')
-    plt.plot(epochs, val_loss, 'b', label='Validation loss')
+    plt.plot(epochs, loss, 'g--', label='Training loss')
+    plt.plot(epochs, val_loss, 'm', label='Validation loss')
     plt.title('Training and validation loss')
     plt.legend()
     plt.show()
@@ -318,8 +318,8 @@ def autoencode_fully_connected(params):
     val_acc = train_history.history['val_acc']
     epochs = range(params['num_epochs'])
     plt.figure()
-    plt.plot(epochs, acc, 'o', label='Training acc')
-    plt.plot(epochs, val_acc, 'b', label='Validation acc')
+    plt.plot(epochs, acc, 'g--', label='Training acc')
+    plt.plot(epochs, val_acc, 'm', label='Validation acc')
     plt.title('Training and validation acc')
     plt.legend()
     plt.show()
@@ -588,7 +588,7 @@ def main():
     autoencode_fully_connected(params={
         'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32,
         'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001,
-        'num_epochs': 50, 'optimizer': Adam})
+        'num_epochs': 75, 'optimizer': Adam})
 
 
 if __name__ == "__main__":
