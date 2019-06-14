@@ -1,4 +1,5 @@
 import numpy as np
+import cv2
 import pandas as pd
 from keras.losses import categorical_crossentropy
 from keras.optimizers import Adam, SGD, Adadelta
@@ -21,6 +22,8 @@ from sklearn.utils import shuffle, class_weight
 import tensorflow as tf
 from tensorflow.python.keras.callbacks import TensorBoard
 import matplotlib.pyplot as plt
+
+from video_selector import VideoSelector
 
 
 def load_data(rotate_append=False):
@@ -282,7 +285,8 @@ def autoencode_fully_connected(params):
     x = MaxPooling2D((2, 2), padding='same')(x)
 
     flat = Flatten()(x)
-    den = Dense(500, activation='relu', kernel_regularizer=regularizers.l2(0.01))(flat)
+    den = Dense(500, activation='relu')(flat)#, kernel_regularizer=regularizers.l2(0.01)
+    # den = Dropout(rate=.5)(den)
     out = Dense(2, activation='softmax')(den)
 
     full_model = Model(input_img, out)
@@ -330,6 +334,68 @@ def autoencode_fully_connected(params):
     print("pos_train:%.03f\npos_test:%.03f\nneg_test:%.03f" % (pos_train_acc, pos_test_acc, neg_test_acc))
 
     full_model.save_weights('autoencoder_classification.h5')
+    return full_model
+
+
+def test_with_frame():
+    full_model = autoencode_fully_connected(params={
+        'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32,
+        'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001,
+        'num_epochs': 75, 'optimizer': Adam})
+
+    # vid = VideoSelector()
+    # detail_name, filename, hive = vid.download_video(type='fight')
+    frame = None
+    frame_num = 0
+    play_video = True
+    ret = None
+
+    cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/11-20-22.h264")# + filename)
+    while True:
+        locations = []
+        sub_images = None
+        if frame_num % 100 == 0:
+            print("at frame %d" % frame_num)
+        if play_video:
+            ret, frame = cap.read()
+        if ret:
+            cv2.namedWindow("fightz")
+            cv2.imshow("fightz", frame)
+            key = cv2.waitKey(1)
+            if key == 112: # 'p'
+                play_video = not play_video
+            #elif key == 115: # 's'
+            # split the image into small 40x40 windows
+            h, w, colors = frame.shape
+            im_size = 40
+            stride = 20
+            # cycle through the frame finding all (im_size X im_size) images with a stride and locations
+            for i in range(0, h - im_size, stride):
+                for j in range(0, w - im_size, stride):
+                    if sub_images is None:
+                        sub_images = np.array([frame[i:i + im_size, j:j + im_size, :]])
+                    else:
+                        sub_images = np.concatenate((sub_images, [frame[i:i + im_size, j:j + im_size, :]]))
+                    locations.append((i, j))
+            predictions = full_model.predict(sub_images)
+            fight_predictions = np.where(np.round(predictions)[:, 1] == 1)
+            # save all predicted fights and the surrounding context
+            for idx, loc in enumerate(np.array(locations)[fight_predictions]):
+                curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                detail_name = "11-20-22_"
+                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                            +detail_name+"fight[%d](frame=%d).png" % (idx, frame_num),
+                            curr_sub)
+                #break # breakout because we have collected all sub images of a frame with fights in it
+            frame_num += 1
+        else:
+            cap.release()
+            cv2.destroyAllWindows()
+            break
+
+    print("yo")
+    pass
 
 # NEXT STEP: Change this model to be like the datacamp example with encoder and fully connected for classification
 # I should decide on a scoring metric? Mae
@@ -585,10 +651,12 @@ def main():
     # build_autoencoder()
     # autoencode_params(params={'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32, 'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001, 'num_epochs': 100, 'optimizer': Adam})
     # tune()
-    autoencode_fully_connected(params={
-        'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32,
-        'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001,
-        'num_epochs': 75, 'optimizer': Adam})
+    # autoencode_fully_connected(params={
+    #     'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32,
+    #     'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001,
+    #     'num_epochs': 75, 'optimizer': Adam})
+    test_with_frame()
+
 
 
 if __name__ == "__main__":
