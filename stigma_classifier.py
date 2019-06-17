@@ -274,7 +274,7 @@ def load_data():
         stigma = stigma[1]
         pos_path = 'my_stigma_locations/' + stigma.name[:stigma.name.rfind("/")] + "/positive/"
         neg_path = 'my_stigma_locations/' + stigma.name[:stigma.name.rfind("/")] + "/negative/"
-        if count <= int(stop*.85): # use samples 0-42 for training
+        if count <= int(stop*.8): # use samples 0-42 for training
             for im in os.listdir(pos_path):
                 if positive is None:
                     positive = np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])
@@ -511,13 +511,13 @@ def calculate_RSS(autoencoder, pos_train, pos_test, neg_test):
     return best_acc, seperate_acc
 
 
-def test_model():
+def test_model(full_model):
+    global im_size
     stride = 50
     win_size = 200
     half_size = win_size/2
     X = None
     locations = []
-    ife = InceptionFeatureExtractor()
 
     im = io.imread("my_stigma_locations/02.07.18_3403289_pos2_kurz/178MEDIA/Y0190578.jpg")
     # cycle through all 200x200 images
@@ -525,36 +525,45 @@ def test_model():
         for j in np.arange(0, im.shape[1] - win_size, stride):  # y direction
             locations.append((i,j))
             if X is None:
-                X = np.array([im[i:i + win_size, j:j + win_size]])
+                X = np.array([resize(rgb2hsv(im[i:i + win_size, j:j + win_size]), output_shape=(im_size,im_size,3))])
             else:
-                X = np.concatenate((X, [im[i:i + win_size, j:j + win_size]]))
+                X = np.concatenate((X, np.array([resize(rgb2hsv(im[i:i + win_size, j:j + win_size]), output_shape=(im_size,im_size,3))])))
+
+    results = np.round(full_model.predict(X))
+    locations = np.array(locations)
+    stigma_locs = locations[np.where(results[:,1] == 1)]
+
+    # NEXT: plot the stigma_locations as boxes
+    # calculate the mean of all the location centers and plot that as well.
+
+
 
     # Returns a compiled model identical to the previous one
-    model = load_model('data/my_model.h5')
+    # model = load_model('data/my_model.h5')
 
     # model.compile(optimizer=Adam(lr=0.0001),
     #               loss='binary_crossentropy',
     #               metrics=['accuracy', precision(), recall()])
-    y_pred = None
-    size = 200
-    for i in range(int(np.ceil(len(X)/size))):
-        if y_pred is None:
-            y_pred = model.predict(ife.transform(my_X=X[i*size:i*size+size]))
-        else:
-            y_pred = np.concatenate((y_pred, model.predict(ife.transform(my_X=X[i*size:i*size+size]))))
-
-    try:
-        stigma_location = locations[int(np.median(np.where(y_pred > .5)[0]))]
-    except ValueError:
-        stigma_location = (0, 0)
-    # plot the location as a square
-    print("stigma top left loc:", stigma_location)
-    fig, ax = plt.subplots(1)
-    ax.imshow(im)
-    for r in np.where(y_pred > .5)[0]:
-        rect = patches.Rectangle((locations[int(r)][1], locations[int(r)][0]), size, size, linewidth=3, edgecolor='r', facecolor='none')
-        ax.add_patch(rect)
-    plt.show()
+    # y_pred = None
+    # size = 200
+    # for i in range(int(np.ceil(len(X)/size))):
+    #     if y_pred is None:
+    #         y_pred = model.predict(ife.transform(my_X=X[i*size:i*size+size]))
+    #     else:
+    #         y_pred = np.concatenate((y_pred, model.predict(ife.transform(my_X=X[i*size:i*size+size]))))
+    #
+    # try:
+    #     stigma_location = locations[int(np.median(np.where(y_pred > .5)[0]))]
+    # except ValueError:
+    #     stigma_location = (0, 0)
+    # # plot the location as a square
+    # print("stigma top left loc:", stigma_location)
+    # fig, ax = plt.subplots(1)
+    # ax.imshow(im)
+    # for r in np.where(y_pred > .5)[0]:
+    #     rect = patches.Rectangle((locations[int(r)][1], locations[int(r)][0]), size, size, linewidth=3, edgecolor='r', facecolor='none')
+    #     ax.add_patch(rect)
+    # plt.show()
     print("hi")
 
 
