@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import cv2
 import pandas as pd
@@ -73,10 +75,15 @@ def load_data(rotate_append=False):
         for i, im in enumerate(pos2):
             pos2[i] = rotate(im, angle=rot[i%3])
         positive = np.concatenate((positive, pos2))
+        neg2 = positive.copy()
+        for i, im in enumerate(neg2):
+            neg2[i] = rotate(im, angle=rot[i%3])
+        negative = np.concatenate((negative, neg2))
 
     positive = positive / 255
     p_test = p_test / 255
     negative = negative / 255
+    n_test = n_test / 255
     return positive, p_test, negative, n_test
 
 
@@ -224,7 +231,7 @@ The weights are then saved and the training/validation loss are plotted to ensur
 def autoencode_params(params=None):
     if params is None:
         params = {'batch_size': 20, 'conv_1_filter': 5, 'conv_1_layers': 32, 'learning_rate': 0.01, 'num_epochs': 100, 'optimizer': Adam}
-    pos_train, pos_test, neg_train, neg_test = load_data()
+    pos_train, pos_test, neg_train, neg_test = load_data(rotate_append=False)
 
     input_img = Input(shape=(40, 40, 3))  # adapt this if using `channels_first` image data format
 
@@ -248,13 +255,14 @@ def autoencode_params(params=None):
     autoencoder = Model(input_img, decoded)
     autoencoder.compile(optimizer=params['optimizer'](lr=params['learning_rate']), loss='mean_squared_error')
 
+    curr_t = time.gmtime()
     train_history = autoencoder.fit(pos_train, pos_train,
                                     epochs=params['num_epochs'],
                                     batch_size=params['batch_size'],
                                     shuffle=True,
                                     validation_data=(pos_test, pos_test),
                                     verbose=2,
-                                    callbacks=[TensorBoard(log_dir='/tmp/autoencoder')])
+                                    callbacks=[TensorBoard(log_dir='tmp/autoencoder_%d-%d-%d' % (curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
     autoencoder.save_weights('autoencoder.h5')
 
     loss = train_history.history['loss']
@@ -272,9 +280,11 @@ def autoencode_params(params=None):
 
 
 def autoencode_fully_connected(params):
+    dense_layer_nodes = 512
+    reg = 0.0001
     autoencoder = autoencode_params(params)
 
-    pos_train, pos_test, neg_train, neg_test = load_data()
+    pos_train, pos_test, neg_train, neg_test = load_data(rotate_append=True)
     print("yo")
     input_img = Input(shape=(40, 40, 3))
 
@@ -285,7 +295,7 @@ def autoencode_fully_connected(params):
     x = MaxPooling2D((2, 2), padding='same')(x)
 
     flat = Flatten()(x)
-    den = Dense(500, activation='relu')(flat)#, kernel_regularizer=regularizers.l2(0.01)
+    den = Dense(dense_layer_nodes, activation='relu', kernel_regularizer=regularizers.l2(reg))(flat)#
     # den = Dropout(rate=.5)(den)
     out = Dense(2, activation='softmax')(den)
 
@@ -298,6 +308,7 @@ def autoencode_fully_connected(params):
         layer.trainable = False
     # compile and train the model
     full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.0001), metrics=['accuracy'])
+    curr_t = time.gmtime()
     train_history = full_model.fit(np.concatenate((pos_train, neg_train)), to_categorical(np.array([1]*len(pos_train) + [0]*len(neg_train)), 2),
                                    epochs=params['num_epochs'],
                                    batch_size=params['batch_size'],
@@ -305,7 +316,7 @@ def autoencode_fully_connected(params):
                                    validation_data=(np.concatenate((pos_test, neg_test)), to_categorical(np.array([1]*len(pos_test) + [0]*len(neg_test)), 2)),
                                    verbose=2,
                                    sample_weight=None,
-                                   callbacks=[TensorBoard(log_dir='/tmp/autoencoder')])
+                                   callbacks=[TensorBoard(log_dir='tmp/autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
     # plot the train and validation loss
     loss = train_history.history['loss']
     val_loss = train_history.history['val_loss']
@@ -329,9 +340,10 @@ def autoencode_fully_connected(params):
     plt.show()
 
     pos_train_acc = accuracy_score(np.round(full_model.predict(pos_train)).astype(int), to_categorical(np.array([1] * len(pos_train))))
+    neg_train_acc = accuracy_score(np.round(full_model.predict(neg_train)).astype(int), np.flip(to_categorical(np.array([1] * len(neg_train))), axis=1))
     pos_test_acc = accuracy_score(np.round(full_model.predict(pos_test)).astype(int), to_categorical(np.array([1] * len(pos_test))))
     neg_test_acc = accuracy_score(np.round(full_model.predict(neg_test)).astype(int), np.flip(to_categorical(np.array([1] * len(neg_test))), axis=1))
-    print("pos_train:%.03f\npos_test:%.03f\nneg_test:%.03f" % (pos_train_acc, pos_test_acc, neg_test_acc))
+    print("pos_train:%.03f\nneg_train:%.03f\npos_test:%.03f\nneg_test:%.03f" % (pos_train_acc, neg_train_acc, pos_test_acc, neg_test_acc))
 
     full_model.save_weights('autoencoder_classification.h5')
     return full_model
@@ -346,14 +358,15 @@ def test_with_frame():
     # vid = VideoSelector()
     # detail_name, filename, hive = vid.download_video(type='fight')
     frame = None
-    frame_num = 0
+    frame_num = -1
     play_video = True
     ret = None
 
-    cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/11-20-22.h264")# + filename)
+    cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/17-26-55.h264")# + filename)
     while True:
         locations = []
         sub_images = None
+        frame_num += 1
         if frame_num % 100 == 0:
             print("at frame %d" % frame_num)
         if play_video:
@@ -362,6 +375,8 @@ def test_with_frame():
             cv2.namedWindow("fightz")
             cv2.imshow("fightz", frame)
             key = cv2.waitKey(1)
+            # if frame_num < 1100:
+            #     continue
             if key == 112: # 'p'
                 play_video = not play_video
             #elif key == 115: # 's'
@@ -381,14 +396,19 @@ def test_with_frame():
             fight_predictions = np.where(np.round(predictions)[:, 1] == 1)
             # save all predicted fights and the surrounding context
             for idx, loc in enumerate(np.array(locations)[fight_predictions]):
-                curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
-                cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                detail_name = "11-20-22_"
+                curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
+                # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                detail_name = "17-26-55_"
                 cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
                             +detail_name+"fight[%d](frame=%d).png" % (idx, frame_num),
                             curr_sub)
+                curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                            +detail_name+"fight[%d](frame=%d)CONTEXT.png" % (idx, frame_num),
+                            curr_sub)
                 #break # breakout because we have collected all sub images of a frame with fights in it
-            frame_num += 1
         else:
             cap.release()
             cv2.destroyAllWindows()
@@ -651,11 +671,11 @@ def main():
     # build_autoencoder()
     # autoencode_params(params={'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32, 'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001, 'num_epochs': 100, 'optimizer': Adam})
     # tune()
-    # autoencode_fully_connected(params={
-    #     'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32,
-    #     'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001,
-    #     'num_epochs': 75, 'optimizer': Adam})
-    test_with_frame()
+    full_model = autoencode_fully_connected(params={
+        'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32,
+        'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001,
+        'num_epochs': 75, 'optimizer': Adam})
+    # test_with_frame()
 
 
 
