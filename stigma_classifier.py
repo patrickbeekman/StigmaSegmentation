@@ -46,7 +46,7 @@ def main():
     positive, negative, p_test, n_test = load_data()
     # build_autoencoder()
     full_model = autoencode_fully_connected()
-    test_model(full_model)
+    # test_model(full_model)
     # test_model()
     pass
 
@@ -264,7 +264,7 @@ def build_model():
 def load_data():
     global stigma_center, im_size, positive, negative, p_test, n_test
     count = 0
-    stop = 25
+    stop = 50
 
     # load the data
     for stigma in stigma_center.iterrows():
@@ -304,7 +304,10 @@ def load_data():
                     continue
         else: # validation
             pass
-        print("[%d] appended %s, curr size is %d" % (count-1, stigma.name, (len(positive))))
+        try:
+            print("[%d] appended %s | pos_train size:%d | neg_train:%d | pos_test:%d | neg_test:%d |" % (count-1, stigma.name, len(positive), len(negative), len(p_test), len(n_test)))
+        except TypeError:
+            print("[%d] appended %s | pos_train size:%d | neg_train:%d | pos_test:%d | neg_test:%d |" % (count-1, stigma.name, len(positive), len(negative), 0, 0))
     return positive, negative, p_test, n_test
 
 
@@ -396,7 +399,7 @@ def build_autoencoder():
 
 def autoencode_fully_connected():
     global im_size, positive, negative, p_test, n_test
-    dense_layer_nodes = 512
+    dense_layer_nodes = 1024
     reg = 0.0001
     num_epochs = 80
     autoencoder = build_autoencoder()
@@ -414,7 +417,7 @@ def autoencode_fully_connected():
 
     flat = Flatten()(encoded)
     den = Dense(dense_layer_nodes, activation='relu', kernel_regularizer=regularizers.l2(reg))(flat)#
-    den = Dropout(rate=.5)(den)
+    den = Dropout(rate=.6)(den)
     # den = Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001))(den)
     out = Dense(2, activation='softmax')(den)
 
@@ -435,7 +438,22 @@ def autoencode_fully_connected():
                                    validation_data=(np.concatenate((p_test, n_test)), to_categorical(np.array([1]*len(p_test) + [0]*len(n_test)), 2)),
                                    verbose=2,
                                    sample_weight=None,
-                                   callbacks=[TensorBoard(log_dir='tmp/autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+                                   callbacks=[TensorBoard(log_dir='tmp/autoencoder_fully_connected[0](layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+
+    # set weights to trainable
+    for layer in full_model.layers[0:6]:
+        layer.trainable = True
+    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.0001), metrics=['accuracy'])
+    curr_t = time.gmtime()
+    train_history = full_model.fit(np.concatenate((positive, negative)), to_categorical(np.array([1]*len(positive) + [0]*len(negative)), 2),
+                                   epochs=num_epochs,
+                                   batch_size=20,
+                                   shuffle=True,
+                                   validation_data=(np.concatenate((p_test, n_test)), to_categorical(np.array([1]*len(p_test) + [0]*len(n_test)), 2)),
+                                   verbose=2,
+                                   sample_weight=None,
+                                   callbacks=[TensorBoard(log_dir='tmp/autoencoder_fully_connected[1](layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+
     # plot the train and validation loss
     loss = train_history.history['loss']
     val_loss = train_history.history['val_loss']
@@ -532,7 +550,7 @@ def test_model(full_model):
         'my_stigma_locations/27.06.18_4111145_pos4_kurz/159MEDIA/Y0131140.jpg',
         'my_stigma_locations/27.06.18_4111145_pos4_kurz/159MEDIA/Y0131537.jpg',
         'my_stigma_locations/28.06.18_1654305_pos6_kurz/170MEDIA/Y0170254.jpg',
-        'my_stigma_locations/28.06.18_4237688_pos5_kurz/221MEDIA/Y0210041.jpg',
+        # 'my_stigma_locations/28.06.18_4237688_pos5_kurz/221MEDIA/Y0210041.jpg',
         'my_stigma_locations/29.06.18_3403289_pos2_kurz/172MEDIA/Y0170746.jpg',
         'my_stigma_locations/30.06.18_1654305_pos6_kurz/172MEDIA/Y0180506.jpg',
         'my_stigma_locations/30.06.18_3403289_pos2_kurz/174MEDIA/Y0181141.jpg',
