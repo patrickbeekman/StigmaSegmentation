@@ -46,7 +46,7 @@ def main():
     positive, negative, p_test, n_test = load_data()
     # build_autoencoder()
     full_model = autoencode_fully_connected()
-    # test_model(full_model)
+    test_model(full_model)
     # test_model()
     pass
 
@@ -283,18 +283,20 @@ def load_data():
                     positive = np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])
                 else:
                     positive = np.concatenate((positive, np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])))
-            for im in np.random.choice(os.listdir(neg_path), len(positive)):
+            for im in np.random.choice(os.listdir(neg_path), len(os.listdir(pos_path))):
                 if negative is None:
                     negative = np.array([resize(rgb2hsv(io.imread(neg_path + im)), output_shape=(im_size,im_size,3))])
                 else:
                     negative = np.concatenate((negative, np.array([resize(rgb2hsv(io.imread(neg_path + im)), output_shape=(im_size,im_size,3))])))
+            if count == int(stop*.8):
+                print("-------------" * 4 + "Testing below" + "-------------" * 4)
         elif count <= stop: # use samples 43-50 for testing
             for im in os.listdir(pos_path):
                 if p_test is None:
                     p_test = np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])
                 else:
                     p_test = np.concatenate((p_test, np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])))
-            for im in np.random.choice(os.listdir(neg_path), len(p_test)):
+            for im in np.random.choice(os.listdir(neg_path), len(os.listdir(pos_path))):
                 try:
                     if n_test is None:
                         n_test = np.array([resize(rgb2hsv(io.imread(neg_path + im)), output_shape=(im_size,im_size,3))])
@@ -313,7 +315,7 @@ def load_data():
 
 def build_autoencoder():
     global im_size, positive, negative, p_test, n_test
-    num_epochs = 100
+    num_epochs = 60
 
     # root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive/"
     # for im in os.listdir(root_path):
@@ -399,9 +401,9 @@ def build_autoencoder():
 
 def autoencode_fully_connected():
     global im_size, positive, negative, p_test, n_test
-    dense_layer_nodes = 1024
+    dense_layer_nodes = 512
     reg = 0.0001
-    num_epochs = 80
+    num_epochs = 100
     autoencoder = build_autoencoder()
 
     # pos_train, pos_test, neg_train, neg_test = load_data(rotate_append=True)
@@ -555,7 +557,7 @@ def test_model(full_model):
         'my_stigma_locations/30.06.18_1654305_pos6_kurz/172MEDIA/Y0180506.jpg',
         'my_stigma_locations/30.06.18_3403289_pos2_kurz/174MEDIA/Y0181141.jpg',
         'my_stigma_locations/01.07.18_4237688_pos5_kurz/216MEDIA/Y0190290.jpg',
-        'my_stigma_location/01.07.18_4237688_pos5_kurz/216MEDIA/Y0200983.jpg',
+        # 'my_stigma_location/01.07.18_4237688_pos5_kurz/216MEDIA/Y0200983.jpg',
 
     ]
 
