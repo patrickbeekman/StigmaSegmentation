@@ -1,3 +1,4 @@
+import cv2
 import time
 
 import numpy as np
@@ -14,6 +15,7 @@ from keras import Sequential, Input, Model
 from keras.models import load_model
 from keras.layers import Flatten, Dense, Dropout, regularizers, Conv2D, MaxPooling2D, UpSampling2D, BatchNormalization
 from skimage.color import rgb2hsv
+from skimage.draw import circle, rectangle, rectangle_perimeter, circle_perimeter
 from skimage.transform import resize
 from sklearn.metrics import mean_squared_error, accuracy_score
 from tensorflow.python.keras import backend
@@ -43,7 +45,8 @@ def main():
     # build_model()
     positive, negative, p_test, n_test = load_data()
     # build_autoencoder()
-    autoencode_fully_connected()
+    full_model = autoencode_fully_connected()
+    test_model(full_model)
     # test_model()
     pass
 
@@ -366,14 +369,14 @@ def build_autoencoder():
 
     autoencoder = Model(input_img, decoded)
     autoencoder.compile(optimizer='adam', loss='mean_squared_error')
-
+    curr_t = time.gmtime()
     train_history = autoencoder.fit(positive, positive,
                                     epochs=num_epochs,
                                     batch_size=20,
                                     shuffle=True,
                                     validation_data=(p_test, p_test),
                                     verbose=2,
-                                    callbacks=[TensorBoard(log_dir='tmp/autoencoder')])
+                                    callbacks=[TensorBoard(log_dir='tmp/autoencoder_%d-%d-%d' % (curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
     autoencoder.save("data/autoencoder.h5")
     # autoencoder.load_weights("data/autoencoder.h5")
 
@@ -395,7 +398,7 @@ def autoencode_fully_connected():
     global im_size, positive, negative, p_test, n_test
     dense_layer_nodes = 512
     reg = 0.0001
-    num_epochs = 50
+    num_epochs = 80
     autoencoder = build_autoencoder()
 
     # pos_train, pos_test, neg_train, neg_test = load_data(rotate_append=True)
@@ -411,7 +414,8 @@ def autoencode_fully_connected():
 
     flat = Flatten()(encoded)
     den = Dense(dense_layer_nodes, activation='relu', kernel_regularizer=regularizers.l2(reg))(flat)#
-    # den = Dropout(rate=.5)(den)
+    den = Dropout(rate=.5)(den)
+    # den = Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001))(den)
     out = Dense(2, activation='softmax')(den)
 
     full_model = Model(input_img, out)
@@ -512,18 +516,49 @@ def calculate_RSS(autoencoder, pos_train, pos_test, neg_test):
 
 
 def test_model(full_model):
+    test_paths = [
+        'my_stigma_locations/22.06.18_0870751_pos1_kurz+lang/113MEDIA/Y0060538.jpg',
+        'my_stigma_locations/02.07.18_4982033_pos3_kurz/168MEDIA/Y0150018.jpg',
+        # 'my_stigma_locations/02.07.18_4982033_pos3_kurz/168MEDIA/Y0150474.jpg', # seen similar
+        'my_stigma_locations/19.06.18_0870751_pos1_kurz/101MEDIA/Y0030052.jpg',
+        # 'my_stigma_locations/19.06.18_0870751_pos1_kurz/101MEDIA/Y0030616.jpg', # seen similar
+        # 'my_stigma_locations/19.06.18_4982033_pos3_kurz/101MEDIA/Y0010346.jpg', # seen similar
+        # 'my_stigma_locations/19.06.18_4982033_pos3_kurz/102MEDIA/Y0010483.jpg', # seen similar
+        'my_stigma_locations/20.06.18_0870751_pos1_kurz/106MEDIA/Y0040159.jpg',
+        # 'my_stigma_locations/20.06.18_3403289_pos2_kurz/106MEDIA/Y0020183.jpg', # seen similar
+        # 'my_stigma_locations/21.06.18_0870751_pos1_kurz/109MEDIA/Y0050316.jpg', # seen similar
+        'my_stigma_locations/21.06.18_3403289_pos2_kurz/106MEDIA/Y0030737.jpg',
+        'my_stigma_locations/22.06.18_0870751_pos1_kurz+lang/115MEDIA/Y0060185.jpg',
+        'my_stigma_locations/27.06.18_4111145_pos4_kurz/159MEDIA/Y0131140.jpg',
+        'my_stigma_locations/27.06.18_4111145_pos4_kurz/159MEDIA/Y0131537.jpg',
+        'my_stigma_locations/28.06.18_1654305_pos6_kurz/170MEDIA/Y0170254.jpg',
+        'my_stigma_locations/28.06.18_4237688_pos5_kurz/221MEDIA/Y0210041.jpg',
+        'my_stigma_locations/29.06.18_3403289_pos2_kurz/172MEDIA/Y0170746.jpg',
+        'my_stigma_locations/30.06.18_1654305_pos6_kurz/172MEDIA/Y0180506.jpg',
+        'my_stigma_locations/30.06.18_3403289_pos2_kurz/174MEDIA/Y0181141.jpg',
+        'my_stigma_locations/01.07.18_4237688_pos5_kurz/216MEDIA/Y0190290.jpg',
+        'my_stigma_location/01.07.18_4237688_pos5_kurz/216MEDIA/Y0200983.jpg',
+
+    ]
+
+    print("Testing on different unseen images.")
+    for path in test_paths:
+        predict_stigma_center(full_model, path)
+
+
+def predict_stigma_center(full_model, file_path):
     global im_size
     stride = 50
     win_size = 200
-    half_size = win_size/2
     X = None
     locations = []
+    file_name = file_path[file_path.rfind("/")+1:file_path.find(".jpg")]
 
-    im = io.imread("my_stigma_locations/02.07.18_3403289_pos2_kurz/178MEDIA/Y0190578.jpg")
+    im = io.imread(file_path)
     # cycle through all 200x200 images
     for i in np.arange(0, im.shape[0] - win_size, stride):  # x direction
         for j in np.arange(0, im.shape[1] - win_size, stride):  # y direction
-            locations.append((i,j))
+            locations.append((j,i))
             if X is None:
                 X = np.array([resize(rgb2hsv(im[i:i + win_size, j:j + win_size]), output_shape=(im_size,im_size,3))])
             else:
@@ -532,42 +567,13 @@ def test_model(full_model):
     results = np.round(full_model.predict(X))
     locations = np.array(locations)
     stigma_locs = locations[np.where(results[:,1] == 1)]
+    center_of_stigma = np.median(stigma_locs, axis=0).astype(int)#stigma_locs.mean(axis=0).astype(int)
 
-    # NEXT: plot the stigma_locations as boxes
-    # calculate the mean of all the location centers and plot that as well.
-
-
-
-    # Returns a compiled model identical to the previous one
-    # model = load_model('data/my_model.h5')
-
-    # model.compile(optimizer=Adam(lr=0.0001),
-    #               loss='binary_crossentropy',
-    #               metrics=['accuracy', precision(), recall()])
-    # y_pred = None
-    # size = 200
-    # for i in range(int(np.ceil(len(X)/size))):
-    #     if y_pred is None:
-    #         y_pred = model.predict(ife.transform(my_X=X[i*size:i*size+size]))
-    #     else:
-    #         y_pred = np.concatenate((y_pred, model.predict(ife.transform(my_X=X[i*size:i*size+size]))))
-    #
-    # try:
-    #     stigma_location = locations[int(np.median(np.where(y_pred > .5)[0]))]
-    # except ValueError:
-    #     stigma_location = (0, 0)
-    # # plot the location as a square
-    # print("stigma top left loc:", stigma_location)
-    # fig, ax = plt.subplots(1)
-    # ax.imshow(im)
-    # for r in np.where(y_pred > .5)[0]:
-    #     rect = patches.Rectangle((locations[int(r)][1], locations[int(r)][0]), size, size, linewidth=3, edgecolor='r', facecolor='none')
-    #     ax.add_patch(rect)
-    # plt.show()
-    print("hi")
-
-
-
+    image = cv2.imread(file_path)
+    calculated_center = tuple(center_of_stigma + 100)
+    print("Predicted center is (%d, %d)" % calculated_center)
+    cv2.circle(image, calculated_center, 100, thickness=5, color=(0, 255, 0))
+    cv2.imwrite("stigma_predictions/%s_(%d, %d).png" % (file_name, calculated_center[0], calculated_center[1]), image)
 
 
 if __name__ == "__main__":
