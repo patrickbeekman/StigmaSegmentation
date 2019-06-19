@@ -264,7 +264,7 @@ def build_model():
 def load_data():
     global stigma_center, im_size, positive, negative, p_test, n_test
     count = 0
-    stop = 50
+    stop = 8
 
     # load the data
     for stigma in stigma_center.iterrows():
@@ -593,7 +593,7 @@ def predict_stigma_center(full_model, file_path):
     calculated_center = tuple(center_of_stigma + 100)
     print("Predicted center is (%d, %d)" % calculated_center)
     cv2.circle(image, calculated_center, 100, thickness=5, color=(0, 255, 0))
-    cv2.imwrite("stigma_predictions/%s_(%d, %d).png" % (file_name, calculated_center[0], calculated_center[1]), image)
+    cv2.imwrite("stigma_predictions/[BAD]%s_(%d, %d).png" % (file_name, calculated_center[0], calculated_center[1]), image)
 
 
 if __name__ == "__main__":

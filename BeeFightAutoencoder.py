@@ -220,9 +220,10 @@ def build_autoencoder():
 
     print("yo")
 
+
 def tune():
-    pos_train, pos_test, neg_test = load_data()
-    hyper_param_tuning(pos_train, pos_test, neg_test)
+    pos_train, neg_train, pos_test, neg_test = load_data()
+    hyper_param_tuning(pos_train, pos_test, np.concatenate((neg_test, neg_train)))
 
 '''
 Takes as input a dictionary of parameters and then train the autoencoder.
@@ -257,7 +258,7 @@ def autoencode_params(params=None):
 
     curr_t = time.gmtime()
     train_history = autoencoder.fit(pos_train, pos_train,
-                                    epochs=params['num_epochs'],
+                                    epochs=60, # params['num_epochs']
                                     batch_size=params['batch_size'],
                                     shuffle=True,
                                     validation_data=(pos_test, pos_test),
@@ -280,23 +281,23 @@ def autoencode_params(params=None):
 
 
 def autoencode_fully_connected(params):
-    dense_layer_nodes = 512
+    dense_layer_nodes = 128
     reg = 0.0001
     autoencoder = autoencode_params(params)
 
-    pos_train, pos_test, neg_train, neg_test = load_data(rotate_append=True)
+    pos_train, pos_test, neg_train, neg_test = load_data(rotate_append=False)
     print("yo")
     input_img = Input(shape=(40, 40, 3))
 
     # ENCODER
-    x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation='tanh', padding='same')(input_img)
+    x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation='tanh', padding='same', kernel_regularizer=regularizers.l2(0.0001))(input_img)
     x = MaxPooling2D((2, 2), padding='same')(x)
-    x = Conv2D(params['conv_2_layers'], (params['conv_2_filter'], params['conv_2_filter']), activation='tanh', padding='same')(x)
+    x = Conv2D(params['conv_2_layers'], (params['conv_2_filter'], params['conv_2_filter']), activation='tanh', padding='same', kernel_regularizer=regularizers.l2(0.0001))(x)
     x = MaxPooling2D((2, 2), padding='same')(x)
 
     flat = Flatten()(x)
-    den = Dense(dense_layer_nodes, activation='relu', kernel_regularizer=regularizers.l2(reg))(flat)#
-    # den = Dropout(rate=.5)(den)
+    den = Dense(dense_layer_nodes, activation='relu', kernel_regularizer=regularizers.l2(reg))(flat)
+    den = Dropout(rate=.4)(den)
     out = Dense(2, activation='softmax')(den)
 
     full_model = Model(input_img, out)
@@ -307,7 +308,7 @@ def autoencode_fully_connected(params):
     for layer in full_model.layers[0:5]:
         layer.trainable = False
     # compile and train the model
-    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.0001), metrics=['accuracy'])
+    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.01), metrics=['accuracy'])
     curr_t = time.gmtime()
     train_history = full_model.fit(np.concatenate((pos_train, neg_train)), to_categorical(np.array([1]*len(pos_train) + [0]*len(neg_train)), 2),
                                    epochs=params['num_epochs'],
@@ -315,8 +316,21 @@ def autoencode_fully_connected(params):
                                    shuffle=True,
                                    validation_data=(np.concatenate((pos_test, neg_test)), to_categorical(np.array([1]*len(pos_test) + [0]*len(neg_test)), 2)),
                                    verbose=2,
+                                   callbacks=[TensorBoard(log_dir='tmp/[0]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+    # make all layers trainable
+    for layer in full_model.layers[0:5]:
+        layer.trainable = True
+    # fine tune all of the weights
+    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.0001), metrics=['accuracy'])
+    train_history = full_model.fit(np.concatenate((pos_train, neg_train)), to_categorical(np.array([1] * len(pos_train) + [0] * len(neg_train)), 2),
+                                   epochs=params['num_epochs'],
+                                   batch_size=params['batch_size'],
+                                   shuffle=True,
+                                   validation_data=(np.concatenate((pos_test, neg_test)), to_categorical(np.array([1] * len(pos_test) + [0] * len(neg_test)), 2)),
+                                   verbose=2,
                                    sample_weight=None,
-                                   callbacks=[TensorBoard(log_dir='tmp/autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+                                   callbacks=[TensorBoard(log_dir='tmp/[1]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+
     # plot the train and validation loss
     loss = train_history.history['loss']
     val_loss = train_history.history['val_loss']
@@ -349,11 +363,7 @@ def autoencode_fully_connected(params):
     return full_model
 
 
-def test_with_frame():
-    full_model = autoencode_fully_connected(params={
-        'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32,
-        'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001,
-        'num_epochs': 75, 'optimizer': Adam})
+def test_with_frame(full_model):
 
     # vid = VideoSelector()
     # detail_name, filename, hive = vid.download_video(type='fight')
@@ -395,20 +405,21 @@ def test_with_frame():
             predictions = full_model.predict(sub_images)
             fight_predictions = np.where(np.round(predictions)[:, 1] == 1)
             # save all predicted fights and the surrounding context
-            for idx, loc in enumerate(np.array(locations)[fight_predictions]):
-                curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
-                # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
-                # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                detail_name = "17-26-55_"
-                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-                            +detail_name+"fight[%d](frame=%d).png" % (idx, frame_num),
-                            curr_sub)
-                curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
-                cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-                            +detail_name+"fight[%d](frame=%d)CONTEXT.png" % (idx, frame_num),
-                            curr_sub)
-                #break # breakout because we have collected all sub images of a frame with fights in it
+            if len(fight_predictions) > 1:
+                for idx, loc in enumerate(np.array(locations)[fight_predictions]):
+                    curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
+                    # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                    # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                    detail_name = "17-26-55_"
+                    cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                                +detail_name+"fight[%d](frame=%d).png" % (idx, frame_num),
+                                curr_sub)
+                    curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                    cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                    cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                                +detail_name+"fight[%d](frame=%d)CONTEXT.png" % (idx, frame_num),
+                                curr_sub)
+                    #break # breakout because we have collected all sub images of a frame with fights in it
         else:
             cap.release()
             cv2.destroyAllWindows()
@@ -416,18 +427,6 @@ def test_with_frame():
 
     print("yo")
     pass
-
-# NEXT STEP: Change this model to be like the datacamp example with encoder and fully connected for classification
-# I should decide on a scoring metric? Mae
-'''
-hyperparameter tuning for autoencoder
-- different models (number of convolutions, num of max pools)
-- size of conv filters
-- learning rate
-- num epochs
-- batch_size
-- optimizier and its parameters
-'''
 
 
 def calculate_RSS(autoencoder, pos_train, pos_test, neg_test):
@@ -445,8 +444,6 @@ def calculate_RSS(autoencoder, pos_train, pos_test, neg_test):
     best_thresh = 0
     seperate_acc = [0,0,0]
     thresholds = np.arange(int(RSS_neg.min()), int(RSS_p_test.max()), .5)
-    TPR = []
-    FPR = []
     p = []
     pt = []
     nt = []
@@ -458,13 +455,6 @@ def calculate_RSS(autoencoder, pos_train, pos_test, neg_test):
         positive_acc = (RSS_pos <= t).sum() / len(RSS_pos)
         p_test_acc = (RSS_p_test <= t).sum() / len(RSS_p_test)
         n_test_acc = (RSS_neg > t).sum() / len(RSS_neg)
-
-        # true_positive = (RSS_p_test <= t).sum()
-        # true_negative = (RSS_neg > t).sum()
-        # false_positive = (RSS_neg <= t).sum()
-        # false_negative = (RSS_p_test > t).sum()
-        # TPR.append(true_positive / (true_positive + false_negative))
-        # FPR.append(false_positive / (false_positive + true_negative))
 
         acc = ((positive_acc + p_test_acc) / 2) * n_test_acc
         if acc > best_acc:
@@ -484,22 +474,6 @@ def calculate_RSS(autoencoder, pos_train, pos_test, neg_test):
     plt.ylabel("accuracy")
     plt.show()
 
-    # FPR = np.array(FPR)
-    # TPR = np.array(TPR)
-    # AUC = auc(FPR[FPR.argsort()], TPR[FPR.argsort()])
-    # print("Area under curve is:", AUC)
-    # plt.figure()
-    # lw = 2
-    # plt.plot(FPR, TPR, color='darkorange',
-    #          lw=lw, label='ROC curve (area = %0.2f)' % AUC)
-    # plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
-    # plt.xlim([0.0, 1.0])
-    # plt.ylim([0.0, 1.05])
-    # plt.xlabel('False Positive Rate')
-    # plt.ylabel('True Positive Rate')
-    # plt.title('Receiver operating characteristic for bee fight reconstruction')
-    # plt.legend(loc="lower right")
-    # plt.show()
     return best_acc, seperate_acc
 
 
@@ -521,18 +495,18 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
               }
 
     params_2 = {
-              "conv_1_layers": [8, 16, 32, 64, 128, 256],
+              "conv_1_layers": [16, 32, 64, 128, 256],
               "conv_1_filter": [3, 5],
               "conv_2_layers": [8, 16, 32, 64, 128],
               "conv_2_filter": [3, 5],
               "num_epochs": [100],
               "batch_size": [15, 30],
               "optimizer": [Adam],
-              "learning_rate": [.01, .001, .0001]
+              "learning_rate": [.1, .01, .001]
               }
 
     params_3 = {
-              "conv_1_layers": [8, 16, 32, 64, 128, 256],
+              "conv_1_layers": [16, 32, 64, 128, 256],
               "conv_1_filter": [3, 5],
               "conv_2_layers": [8, 16, 32, 64, 128],
               "conv_2_filter": [3, 5],
@@ -541,7 +515,7 @@ def hyper_param_tuning(pos_train, pos_test, neg_test):
               "num_epochs": [100],
               "batch_size": [15, 30],
               "optimizer": [Adam],
-              "learning_rate": [.01, .001, .0001]
+              "learning_rate": [.1, .01, .001]
               }
 
     # count = 0
@@ -672,10 +646,10 @@ def main():
     # autoencode_params(params={'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32, 'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001, 'num_epochs': 100, 'optimizer': Adam})
     # tune()
     full_model = autoencode_fully_connected(params={
-        'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32,
-        'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001,
-        'num_epochs': 75, 'optimizer': Adam})
-    # test_with_frame()
+        'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 64,
+        'conv_2_filter': 5, 'conv_2_layers': 128, 'learning_rate': 0.001,
+        'num_epochs': 100, 'optimizer': Adam})
+    # test_with_frame(full_model)
 
 
 
