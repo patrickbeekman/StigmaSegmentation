@@ -3,6 +3,7 @@ import time
 import numpy as np
 import cv2
 import pandas as pd
+from keras.callbacks import EarlyStopping
 from keras.losses import categorical_crossentropy
 from keras.optimizers import Adam, SGD, Adadelta
 from keras.utils import to_categorical
@@ -34,21 +35,23 @@ def load_data(rotate_append=False):
     negative = None
     p_test = None
     n_test = None
+    thresh1 = 50
+    thresh2 = 100
 
     root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive_sm/"
     for im in os.listdir(root_path):
         if positive is None:
-            positive = np.array([cv2.Canny(io.imread(root_path + im), 85, 170)])
+            positive = np.array([cv2.Canny(io.imread(root_path + im), thresh1, thresh2)])
         else:
-            positive = np.concatenate((positive, np.array([cv2.Canny(io.imread(root_path + im), 85, 170)])))
+            positive = np.concatenate((positive, np.array([cv2.Canny(io.imread(root_path + im), thresh1, thresh2)])))
     positive = positive.reshape((positive.shape[0], positive.shape[1], positive.shape[2], 1))
 
     root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_testing/positive_sm/"
     for im in os.listdir(root_path):
         if p_test is None:
-            p_test = np.array([cv2.Canny(io.imread(root_path + im), 85, 170)])
+            p_test = np.array([cv2.Canny(io.imread(root_path + im), thresh1, thresh2)])
         else:
-            p_test = np.concatenate((p_test, np.array([cv2.Canny(io.imread(root_path + im), 85, 170)])))
+            p_test = np.concatenate((p_test, np.array([cv2.Canny(io.imread(root_path + im), thresh1, thresh2)])))
     p_test = p_test.reshape((p_test.shape[0], p_test.shape[1], p_test.shape[2], 1))
 
     root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/negative_sm/"
@@ -56,17 +59,17 @@ def load_data(rotate_append=False):
     # neg_sample = np.array(neg_images)[sample_without_replacement(len(neg_images), 1500, random_state=0)]
     for im in os.listdir(root_path):
         if negative is None:
-            negative = np.array([cv2.Canny(io.imread(root_path + im), 85, 170)])
+            negative = np.array([cv2.Canny(io.imread(root_path + im), thresh1, thresh2)])
         else:
-            negative = np.concatenate((negative, np.array([cv2.Canny(io.imread(root_path + im), 85, 170)])))
+            negative = np.concatenate((negative, np.array([cv2.Canny(io.imread(root_path + im), thresh1, thresh2)])))
     negative = negative.reshape((negative.shape[0], negative.shape[1], negative.shape[2], 1))
 
     root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_testing/negative_sm/"
     for im in os.listdir(root_path):
         if n_test is None:
-            n_test = np.array([cv2.Canny(io.imread(root_path + im), 85, 170)])
+            n_test = np.array([cv2.Canny(io.imread(root_path + im), thresh1, thresh2)])
         else:
-            n_test = np.concatenate((n_test, np.array([cv2.Canny(io.imread(root_path + im), 85, 170)])))
+            n_test = np.concatenate((n_test, np.array([cv2.Canny(io.imread(root_path + im), thresh1, thresh2)])))
     n_test = n_test.reshape((n_test.shape[0], n_test.shape[1], n_test.shape[2], 1))
     print("positive_shape:", positive.shape)
 
@@ -143,6 +146,7 @@ def build_autoencoder():
 
     # ENCODER
     x = Conv2D(32, (5, 5), activation='tanh', padding='same')(input_img)
+    x = BatchNormalization()(x)
     x = MaxPooling2D((2, 2), padding='same')(x)
     x = Conv2D(16, (3, 3), activation='tanh', padding='same')(x)
     x = MaxPooling2D((2, 2), padding='same')(x)
@@ -238,8 +242,10 @@ def autoencode_params(params=None):
     input_img = Input(shape=(40, 40, 1))  # adapt this if using `channels_first` image data format
 
     # ENCODER
-    x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation='tanh', padding='same')(input_img)
+    x = BatchNormalization()(input_img)
+    x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation='tanh', padding='same')(x)
     x = MaxPooling2D((2, 2), padding='same')(x)
+    x = BatchNormalization()(x)
     x = Conv2D(params['conv_2_layers'], (params['conv_2_filter'], params['conv_2_filter']), activation='tanh', padding='same')(x)
     x = MaxPooling2D((2, 2), padding='same')(x)
     # x = Conv2D(32, (3, 3), activation='tanh', padding='same')(x)
@@ -248,8 +254,10 @@ def autoencode_params(params=None):
     # DECODER
     # x = Conv2D(32, (3, 3), activation='tanh', padding='same')(encoded)
     # x = UpSampling2D((2, 2))(x)
+    x = BatchNormalization()(x)
     x = Conv2D(params['conv_2_layers'], (params['conv_2_filter'], params['conv_2_filter']), activation='tanh', padding='same')(x)
     x = UpSampling2D((2, 2))(x)
+    x = BatchNormalization()(x)
     # x = Conv2DTranspose(params['conv_2_layers'], params['conv_2_filter'], padding='same', activation='tanh', strides=(2, 2))(x)
     x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation='tanh', padding='same')(x)
     x = UpSampling2D((2, 2))(x)
@@ -284,16 +292,18 @@ def autoencode_params(params=None):
 
 
 def autoencode_fully_connected(params):
-    dense_layer_nodes = 512
-    reg = 0.1
+    dense_layer_nodes = 32
+    reg = 0.3
     autoencoder = autoencode_params(params)
 
     pos_train, pos_test, neg_train, neg_test = load_data(rotate_append=False)
     input_img = Input(shape=(40, 40, 1))
 
     # ENCODER
-    x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation='tanh', padding='same', kernel_regularizer=regularizers.l2(0.1))(input_img) #
+    x = BatchNormalization()(input_img)
+    x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation='tanh', padding='same', kernel_regularizer=regularizers.l2(0.1))(x) #
     x = MaxPooling2D((2, 2), padding='same')(x)
+    x = BatchNormalization()(x)
     x = Conv2D(params['conv_2_layers'], (params['conv_2_filter'], params['conv_2_filter']), activation='tanh', padding='same', kernel_regularizer=regularizers.l2(0.1))(x) # , kernel_regularizer=regularizers.l2(0.0001)
     x = MaxPooling2D((2, 2), padding='same')(x)
 
@@ -343,29 +353,32 @@ def autoencode_fully_connected(params):
                                    validation_data=(np.concatenate((pos_test, neg_test)), to_categorical(np.array([1] * len(pos_test) + [0] * len(neg_test)), 2)),
                                    verbose=2,
                                    sample_weight=None,
-                                   callbacks=[TensorBoard(log_dir='tmp/[1]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+                                   callbacks=[
+                                       EarlyStopping(monitor='val_acc', min_delta=0.001, patience=5, mode='max', restore_best_weights=True),
+                                       TensorBoard(log_dir='tmp/[1]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))
+                                   ])
 
-    # plot the train and validation loss
-    loss = train_history.history['loss']
-    val_loss = train_history.history['val_loss']
-    epochs = range(params['num_epochs'])
-    plt.figure()
-    plt.plot(epochs, loss, 'g--', label='Training loss')
-    plt.plot(epochs, val_loss, 'm', label='Validation loss')
-    plt.title('Training and validation loss')
-    plt.legend()
-    plt.show()
-
-    # plot the train and validation acc
-    acc = train_history.history['acc']
-    val_acc = train_history.history['val_acc']
-    epochs = range(params['num_epochs'])
-    plt.figure()
-    plt.plot(epochs, acc, 'g--', label='Training acc')
-    plt.plot(epochs, val_acc, 'm', label='Validation acc')
-    plt.title('Training and validation acc')
-    plt.legend()
-    plt.show()
+    # # plot the train and validation loss
+    # loss = train_history.history['loss']
+    # val_loss = train_history.history['val_loss']
+    # epochs = range(params['num_epochs'])
+    # plt.figure()
+    # plt.plot(epochs, loss, 'g--', label='Training loss')
+    # plt.plot(epochs, val_loss, 'm', label='Validation loss')
+    # plt.title('Training and validation loss')
+    # plt.legend()
+    # plt.show()
+    #
+    # # plot the train and validation acc
+    # acc = train_history.history['acc']
+    # val_acc = train_history.history['val_acc']
+    # epochs = range(params['num_epochs'])
+    # plt.figure()
+    # plt.plot(epochs, acc, 'g--', label='Training acc')
+    # plt.plot(epochs, val_acc, 'm', label='Validation acc')
+    # plt.title('Training and validation acc')
+    # plt.legend()
+    # plt.show()
 
     pos_train_acc = accuracy_score(np.round(full_model.predict(pos_train)).astype(int), to_categorical(np.array([1] * len(pos_train))))
     neg_train_acc = accuracy_score(np.round(full_model.predict(neg_train)).astype(int), np.flip(to_categorical(np.array([1] * len(neg_train))), axis=1))
@@ -386,7 +399,7 @@ def test_with_frame(full_model):
     play_video = True
     ret = None
 
-    cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/17-26-55.h264")# + filename)
+    cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/13-05-49.h264")# + filename)
     while True:
         locations = []
         sub_images = None
@@ -399,8 +412,10 @@ def test_with_frame(full_model):
             cv2.namedWindow("fightz")
             cv2.imshow("fightz", frame)
             key = cv2.waitKey(1)
-            # if frame_num < 1100:
-            #     continue
+            if frame_num < 520:
+                continue
+            if frame_num == 520:
+                print("h")
             if key == 112: # 'p'
                 play_video = not play_video
             #elif key == 115: # 's'
@@ -412,27 +427,26 @@ def test_with_frame(full_model):
             for i in range(0, h - im_size, stride):
                 for j in range(0, w - im_size, stride):
                     if sub_images is None:
-                        sub_images = np.array([frame[i:i + im_size, j:j + im_size, :]])
+                        sub_images = np.array([cv2.Canny(frame[i:i + im_size, j:j + im_size, :], 85, 170)])
                     else:
-                        sub_images = np.concatenate((sub_images, [frame[i:i + im_size, j:j + im_size, :]]))
+                        sub_images = np.concatenate((sub_images, [cv2.Canny(frame[i:i + im_size, j:j + im_size, :], 85, 170)]))
                     locations.append((i, j))
-            predictions = full_model.predict(sub_images)
-            fight_predictions = np.where(np.round(predictions)[:, 1] == 1)
+            predictions = full_model.predict(sub_images.reshape((sub_images.shape[0], sub_images.shape[1], sub_images.shape[2], 1)))
+            fight_predictions = np.where(predictions[:, 1] >= .9)
             # save all predicted fights and the surrounding context
-            if len(fight_predictions) > 1:
-                for idx, loc in enumerate(np.array(locations)[fight_predictions]):
-                    curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
-                    # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
-                    # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                    detail_name = "17-26-55_"
-                    cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-                                +detail_name+"fight[%d](frame=%d).png" % (idx, frame_num),
-                                curr_sub)
-                    curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
-                    cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                    cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-                                +detail_name+"fight[%d](frame=%d)CONTEXT.png" % (idx, frame_num),
-                                curr_sub)
+            for idx, loc in enumerate(np.array(locations)[fight_predictions[0]]):
+                curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
+                # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                detail_name = "13-05-49_"
+                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                            +detail_name+"fight[%d](frame=%d).png" % (idx, frame_num),
+                            curr_sub)
+                curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                            +detail_name+"fight[%d](frame=%d)CONTEXT.png" % (idx, frame_num),
+                            curr_sub)
         else:
             cap.release()
             cv2.destroyAllWindows()
@@ -685,7 +699,7 @@ def main():
     #     'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32,
     #     'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001,
     #     'num_epochs': 200, 'optimizer': Adam})
-    # test_with_frame(full_model)
+    test_with_frame(full_model)
 
 
 
