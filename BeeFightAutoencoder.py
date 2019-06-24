@@ -3,6 +3,7 @@ import time
 import numpy as np
 import cv2
 import pandas as pd
+from keras.callbacks import EarlyStopping
 from keras.losses import categorical_crossentropy
 from keras.optimizers import Adam, SGD, Adadelta
 from keras.utils import to_categorical
@@ -258,7 +259,7 @@ def autoencode_params(params=None):
 
     curr_t = time.gmtime()
     train_history = autoencoder.fit(pos_train, pos_train,
-                                    epochs=60, # params['num_epochs']
+                                    epochs=30, # params['num_epochs']
                                     batch_size=params['batch_size'],
                                     shuffle=True,
                                     validation_data=(pos_test, pos_test),
@@ -268,7 +269,7 @@ def autoencode_params(params=None):
 
     loss = train_history.history['loss']
     val_loss = train_history.history['val_loss']
-    epochs = range(params['num_epochs'])
+    epochs = range(30)
     plt.figure()
     plt.plot(epochs, loss, 'g--', label='Training loss')
     plt.plot(epochs, val_loss, 'm', label='Validation loss')
@@ -281,22 +282,21 @@ def autoencode_params(params=None):
 
 
 def autoencode_fully_connected(params):
-    dense_layer_nodes = 128
-    reg = 0.0001
+    dense_layer_nodes = 256
+    reg = 0.1
     autoencoder = autoencode_params(params)
 
     pos_train, pos_test, neg_train, neg_test = load_data(rotate_append=False)
-    print("yo")
     input_img = Input(shape=(40, 40, 3))
 
     # ENCODER
-    x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation='tanh', padding='same', kernel_regularizer=regularizers.l2(0.0001))(input_img)
+    x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation='tanh', padding='same')(input_img) # , kernel_regularizer=regularizers.l2(0.1)
     x = MaxPooling2D((2, 2), padding='same')(x)
-    x = Conv2D(params['conv_2_layers'], (params['conv_2_filter'], params['conv_2_filter']), activation='tanh', padding='same', kernel_regularizer=regularizers.l2(0.0001))(x)
+    x = Conv2D(params['conv_2_layers'], (params['conv_2_filter'], params['conv_2_filter']), activation='tanh', padding='same')(x) # , kernel_regularizer=regularizers.l2(0.1)
     x = MaxPooling2D((2, 2), padding='same')(x)
 
     flat = Flatten()(x)
-    den = Dense(dense_layer_nodes, activation='relu', kernel_regularizer=regularizers.l2(reg))(flat)
+    den = Dense(dense_layer_nodes, activation='relu')(flat) # , kernel_regularizer=regularizers.l2(reg)
     den = Dropout(rate=.4)(den)
     out = Dense(2, activation='softmax')(den)
 
@@ -308,7 +308,7 @@ def autoencode_fully_connected(params):
     for layer in full_model.layers[0:5]:
         layer.trainable = False
     # compile and train the model
-    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.01), metrics=['accuracy'])
+    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.001), metrics=['accuracy'])
     curr_t = time.gmtime()
     train_history = full_model.fit(np.concatenate((pos_train, neg_train)), to_categorical(np.array([1]*len(pos_train) + [0]*len(neg_train)), 2),
                                    epochs=params['num_epochs'],
@@ -317,19 +317,6 @@ def autoencode_fully_connected(params):
                                    validation_data=(np.concatenate((pos_test, neg_test)), to_categorical(np.array([1]*len(pos_test) + [0]*len(neg_test)), 2)),
                                    verbose=2,
                                    callbacks=[TensorBoard(log_dir='tmp/[0]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
-    # make all layers trainable
-    for layer in full_model.layers[0:5]:
-        layer.trainable = True
-    # fine tune all of the weights
-    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.0001), metrics=['accuracy'])
-    train_history = full_model.fit(np.concatenate((pos_train, neg_train)), to_categorical(np.array([1] * len(pos_train) + [0] * len(neg_train)), 2),
-                                   epochs=params['num_epochs'],
-                                   batch_size=params['batch_size'],
-                                   shuffle=True,
-                                   validation_data=(np.concatenate((pos_test, neg_test)), to_categorical(np.array([1] * len(pos_test) + [0] * len(neg_test)), 2)),
-                                   verbose=2,
-                                   sample_weight=None,
-                                   callbacks=[TensorBoard(log_dir='tmp/[1]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
 
     # plot the train and validation loss
     loss = train_history.history['loss']
@@ -352,6 +339,22 @@ def autoencode_fully_connected(params):
     plt.title('Training and validation acc')
     plt.legend()
     plt.show()
+
+    # make all layers trainable
+    for layer in full_model.layers[0:5]:
+        layer.trainable = True
+    # fine tune all of the weights
+    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.0001), metrics=['accuracy'])
+    train_history = full_model.fit(np.concatenate((pos_train, neg_train)), to_categorical(np.array([1] * len(pos_train) + [0] * len(neg_train)), 2),
+                                   epochs=params['num_epochs'],
+                                   batch_size=params['batch_size'],
+                                   shuffle=True,
+                                   validation_data=(np.concatenate((pos_test, neg_test)), to_categorical(np.array([1] * len(pos_test) + [0] * len(neg_test)), 2)),
+                                   verbose=2,
+                                   callbacks=[
+                                       EarlyStopping(monitor='val_acc', min_delta=0.01, patience=10, mode='max', restore_best_weights=True),
+                                       TensorBoard(log_dir='tmp/[1]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))
+                                   ])
 
     pos_train_acc = accuracy_score(np.round(full_model.predict(pos_train)).astype(int), to_categorical(np.array([1] * len(pos_train))))
     neg_train_acc = accuracy_score(np.round(full_model.predict(neg_train)).astype(int), np.flip(to_categorical(np.array([1] * len(neg_train))), axis=1))
@@ -403,23 +406,22 @@ def test_with_frame(full_model):
                         sub_images = np.concatenate((sub_images, [frame[i:i + im_size, j:j + im_size, :]]))
                     locations.append((i, j))
             predictions = full_model.predict(sub_images)
-            fight_predictions = np.where(np.round(predictions)[:, 1] == 1)
+            fight_predictions = np.where(predictions[:, 1] >= .9)
             # save all predicted fights and the surrounding context
-            if len(fight_predictions) > 1:
-                for idx, loc in enumerate(np.array(locations)[fight_predictions]):
-                    curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
-                    # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
-                    # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                    detail_name = "17-26-55_"
-                    cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-                                +detail_name+"fight[%d](frame=%d).png" % (idx, frame_num),
-                                curr_sub)
-                    curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
-                    cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                    cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-                                +detail_name+"fight[%d](frame=%d)CONTEXT.png" % (idx, frame_num),
-                                curr_sub)
-                    #break # breakout because we have collected all sub images of a frame with fights in it
+            for idx, loc in enumerate(np.array(locations)[fight_predictions[0]]):
+                curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
+                # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                detail_name = "17-26-55_"
+                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                            +detail_name+"fight[%d](frame=%d).png" % (idx, frame_num),
+                            curr_sub)
+                curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                            +detail_name+"fight[%d](frame=%d)CONTEXT.png" % (idx, frame_num),
+                            curr_sub)
+                #break # breakout because we have collected all sub images of a frame with fights in it
         else:
             cap.release()
             cv2.destroyAllWindows()
