@@ -15,7 +15,8 @@ import os
 from keras.applications.resnet50 import ResNet50
 from keras import Sequential, Input, Model
 from keras.models import load_model
-from keras.layers import Flatten, Dense, Dropout, regularizers, Conv2D, MaxPooling2D, UpSampling2D, BatchNormalization
+from keras.layers import Flatten, Dense, Dropout, regularizers, Conv2D, MaxPooling2D, UpSampling2D, BatchNormalization, \
+    AveragePooling2D
 from skimage.transform import resize, rotate
 from sklearn.metrics import mean_squared_error, roc_auc_score, auc, accuracy_score
 from sklearn.model_selection import ParameterGrid
@@ -259,17 +260,17 @@ def autoencode_params(params=None):
 
     curr_t = time.gmtime()
     train_history = autoencoder.fit(pos_train, pos_train,
-                                    epochs=60, # params['num_epochs']
+                                    epochs=75, # params['num_epochs']
                                     batch_size=params['batch_size'],
                                     shuffle=True,
                                     validation_data=(pos_test, pos_test),
-                                    verbose=2,
-                                    callbacks=[TensorBoard(log_dir='tmp/autoencoder_%d-%d-%d' % (curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+                                    verbose=2)#,
+                                    # callbacks=[TensorBoard(log_dir='tmp/autoencoder_%d-%d-%d' % (curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
     autoencoder.save_weights('autoencoder.h5')
 
     loss = train_history.history['loss']
     val_loss = train_history.history['val_loss']
-    epochs = range(60)
+    epochs = range(75)
     plt.figure()
     plt.plot(epochs, loss, 'g--', label='Training loss')
     plt.plot(epochs, val_loss, 'm', label='Validation loss')
@@ -282,7 +283,7 @@ def autoencode_params(params=None):
 
 
 def autoencode_fully_connected(params, visualize=False):
-    dense_layer_nodes = 64
+    dense_layer_nodes = 256
     reg = 0.01
     autoencoder = autoencode_params(params)
 
@@ -302,8 +303,8 @@ def autoencode_fully_connected(params, visualize=False):
     x = MaxPooling2D((2, 2), padding='same')(x)
 
     flat = Flatten()(x)
-    den = Dense(dense_layer_nodes, activation='relu', kernel_regularizer=regularizers.l2(reg))(flat) #
-    # den = Dropout(rate=.7)(den)
+    den = Dense(dense_layer_nodes, activation='relu')(flat) #, kernel_regularizer=regularizers.l2(reg)
+    den = Dropout(rate=.6)(den)
     out = Dense(1, activation='sigmoid')(den)
 
     full_model = Model(input_img, out)
@@ -321,29 +322,32 @@ def autoencode_fully_connected(params, visualize=False):
                                    batch_size=params['batch_size'],
                                    validation_data=(X_test, y_test),
                                    verbose=2,
-                                   callbacks=[TensorBoard(log_dir='tmp/[0]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+                                   callbacks=[
+                                       EarlyStopping(monitor='val_loss', min_delta=0.01, patience=10, mode='min', restore_best_weights=True),
+                                       TensorBoard(log_dir='tmp/[0]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))
+                                   ])
 
-    # plot the train and validation loss
-    loss = train_history.history['loss']
-    val_loss = train_history.history['val_loss']
-    epochs = range(params['num_epochs'])
-    plt.figure()
-    plt.plot(epochs, loss, 'g--', label='Training loss')
-    plt.plot(epochs, val_loss, 'm', label='Validation loss')
-    plt.title('[1]Training and validation loss')
-    plt.legend()
-    plt.show()
-
-    # plot the train and validation acc
-    acc = train_history.history['acc']
-    val_acc = train_history.history['val_acc']
-    epochs = range(params['num_epochs'])
-    plt.figure()
-    plt.plot(epochs, acc, 'g--', label='Training acc')
-    plt.plot(epochs, val_acc, 'm', label='Validation acc')
-    plt.title('[1]Training and validation acc')
-    plt.legend()
-    plt.show()
+    # # plot the train and validation loss
+    # loss = train_history.history['loss']
+    # val_loss = train_history.history['val_loss']
+    # epochs = range(params['num_epochs'])
+    # plt.figure()
+    # plt.plot(epochs, loss, 'g--', label='Training loss')
+    # plt.plot(epochs, val_loss, 'm', label='Validation loss')
+    # plt.title('[1]Training and validation loss')
+    # plt.legend()
+    # plt.show()
+    #
+    # # plot the train and validation acc
+    # acc = train_history.history['acc']
+    # val_acc = train_history.history['val_acc']
+    # epochs = range(params['num_epochs'])
+    # plt.figure()
+    # plt.plot(epochs, acc, 'g--', label='Training acc')
+    # plt.plot(epochs, val_acc, 'm', label='Validation acc')
+    # plt.title('[1]Training and validation acc')
+    # plt.legend()
+    # plt.show()
 
     # make all layers trainable
     for layer in full_model.layers[0:5]:
@@ -356,36 +360,36 @@ def autoencode_fully_connected(params, visualize=False):
                                    validation_data=(X_test, y_test),
                                    verbose=2,
                                    callbacks=[
-                                       #EarlyStopping(monitor='val_acc', min_delta=0.01, patience=10, mode='max', restore_best_weights=True),
+                                       EarlyStopping(monitor='val_loss', min_delta=0.01, patience=10, mode='min', restore_best_weights=True),
                                        TensorBoard(log_dir='tmp/[1]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))
                                    ])
 
-    # plot the train and validation loss
-    loss = train_history.history['loss']
-    val_loss = train_history.history['val_loss']
-    epochs = range(params['num_epochs'])
-    plt.figure()
-    plt.plot(epochs, loss, 'g--', label='Training loss')
-    plt.plot(epochs, val_loss, 'm', label='Validation loss')
-    plt.title('[2]Training and validation loss')
-    plt.legend()
-    plt.show()
-
-    # plot the train and validation acc
-    acc = train_history.history['acc']
-    val_acc = train_history.history['val_acc']
-    epochs = range(params['num_epochs'])
-    plt.figure()
-    plt.plot(epochs, acc, 'g--', label='Training acc')
-    plt.plot(epochs, val_acc, 'm', label='Validation acc')
-    plt.title('[2]Training and validation acc')
-    plt.legend()
-    plt.show()
+    # # plot the train and validation loss
+    # loss = train_history.history['loss']
+    # val_loss = train_history.history['val_loss']
+    # epochs = range(params['num_epochs'])
+    # plt.figure()
+    # plt.plot(epochs, loss, 'g--', label='Training loss')
+    # plt.plot(epochs, val_loss, 'm', label='Validation loss')
+    # plt.title('[2]Training and validation loss')
+    # plt.legend()
+    # plt.show()
+    #
+    # # plot the train and validation acc
+    # acc = train_history.history['acc']
+    # val_acc = train_history.history['val_acc']
+    # epochs = range(params['num_epochs'])
+    # plt.figure()
+    # plt.plot(epochs, acc, 'g--', label='Training acc')
+    # plt.plot(epochs, val_acc, 'm', label='Validation acc')
+    # plt.title('[2]Training and validation acc')
+    # plt.legend()
+    # plt.show()
 
     pos_train_acc = accuracy_score(np.round(full_model.predict(pos_train)).astype(int), np.array([1] * len(pos_train)))
-    neg_train_acc = accuracy_score(np.round(full_model.predict(neg_train)).astype(int), np.array([1] * len(neg_train)))
+    neg_train_acc = accuracy_score(np.round(full_model.predict(neg_train)).astype(int), np.array([0] * len(neg_train)))
     pos_test_acc = accuracy_score(np.round(full_model.predict(pos_test)).astype(int), np.array([1] * len(pos_test)))
-    neg_test_acc = accuracy_score(np.round(full_model.predict(neg_test)).astype(int), np.array([1] * len(neg_test)))
+    neg_test_acc = accuracy_score(np.round(full_model.predict(neg_test)).astype(int), np.array([0] * len(neg_test)))
     print("pos_train:%.03f\nneg_train:%.03f\npos_test:%.03f\nneg_test:%.03f" % (pos_train_acc, neg_train_acc, pos_test_acc, neg_test_acc))
 
     full_model.save_weights('autoencoder_classification.h5')
@@ -397,20 +401,50 @@ def autoencode_fully_connected(params, visualize=False):
 # heavily based on: https://github.com/gabrielpierobon/cnnshapes/blob/master/README.md
 def visualize_conv_layers(model):
     print("num model layers %d" % len(model.layers))
-    layer_outputs = [layer.output for layer in model.layers[1:5]][1:]  # Extracts the outputs of the top 12 layers
+    layer_outputs = [layer.output for layer in model.layers[1:5]]#[1:]  # Extracts the outputs of the top 12 layers
     activation_model = Model(inputs=model.input, outputs=layer_outputs)  # Creates a model that will return these outputs, given the model input
 
-    test_img = np.array([cv2.resize(io.imread("C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive_sm/10-50-40_fight(494,56).png"), (20,20))])
+    pos_test_img = np.array([io.imread("C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive_sm/10-50-40_fight(494,56).png")])
+    neg_test_img = np.array([io.imread("C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/negative_sm/10-30-28_fight(128,261).png")])
 
-    activations = activation_model.predict(test_img)
+    pos_activations = activation_model.predict(pos_test_img)
+    neg_activations = activation_model.predict(neg_test_img)
 
     layer_names = []
     for layer in model.layers[1:5]:
         layer_names.append(layer.name)
 
+    model_weights = [(name, layer.get_weights()) for name, layer in zip(layer_names, model.layers[1:5]) if "conv2d" in name]
+
+    for layer in model_weights:
+        # num_filters = layer[1][0].shape[3]
+        colors = ['Red', "Green", "Blue"]
+        for i, c in enumerate(colors):
+            fig, ax = plt.subplots(2, 2)
+            plt.suptitle(c + "channel")
+            ax[0, 0].imshow(layer[1][0][:,:,:,0].squeeze()[:,:,i], cmap='gray') #ax[0, 0]
+            ax[0, 0].set_title(layer[0]+"_filter=0")
+            ax[0, 1].imshow(layer[1][0][:,:,:,1].squeeze()[:,:,i], cmap='gray') # ax[0, 1]
+            ax[0, 1].set_title(layer[0]+"_filter=1")
+            ax[1, 0].imshow(layer[1][0][:,:,:,2].squeeze()[:,:,i], cmap='gray') # ax[0, 2]
+            ax[1, 0].set_title(layer[0]+"_filter=2")
+            ax[1, 1].imshow(layer[1][0][:,:,:,3].squeeze()[:,:,i], cmap='gray') # ax[0, 3]
+            ax[1, 1].set_title(layer[0]+"_filter=3")
+            # ax[1, 0].imshow(layer[1][0][:,:,:,4].squeeze()[:,:,i], cmap='gray')
+            # ax[1, 0].set_title(layer[0]+"_filter=4")
+            # ax[1, 1].imshow(layer[1][0][:,:,:,5].squeeze()[:,:,i], cmap='gray')
+            # ax[1, 1].set_title(layer[0]+"_filter=5")
+            # ax[1, 2].imshow(layer[1][0][:,:,:,6].squeeze()[:,:,i], cmap='gray')
+            # ax[1, 2].set_title(layer[0]+"_filter=6")
+            # ax[1, 3].imshow(layer[1][0][:,:,:,7].squeeze()[:,:,i], cmap='gray')
+            # ax[1, 3].set_title(layer[0]+"_filter=7")
+            plt.show()
+            plt.clf()
+
+    print(layer_names)
     images_per_row = 4
 
-    for layer_name, layer_activation in zip(layer_names, activations):
+    for layer_name, layer_activation in zip(layer_names, pos_activations):
         n_features = layer_activation.shape[-1]  # Number of features in the feature map
         size = layer_activation.shape[1]  # The feature map has shape (1, size, size, n_features).
         n_cols = n_features // images_per_row  # Tiles the activation channels in this matrix
@@ -420,8 +454,8 @@ def visualize_conv_layers(model):
                 channel_image = layer_activation[0,
                                 :, :,
                                 col * images_per_row + row]
-                channel_image -= channel_image.mean()  # Post-processes the feature to make it visually palatable
-                channel_image /= channel_image.std()
+                channel_image = (channel_image-channel_image.mean())/channel_image.std()  # Post-processes the feature to make it visually palatable
+                # channel_image /=
                 channel_image *= 64
                 channel_image += 128
                 channel_image = np.clip(channel_image, 0, 255).astype('uint8')
@@ -431,9 +465,37 @@ def visualize_conv_layers(model):
         scale = 1. / size
         plt.figure(figsize=(scale * display_grid.shape[1],
                             scale * display_grid.shape[0]))
-        plt.title(layer_name)
+        plt.title("pos_" + layer_name)
         plt.grid(True)
         plt.imshow(display_grid, aspect='auto', cmap='viridis')
+        plt.colorbar()
+        plt.show()
+
+    for layer_name, layer_activation in zip(layer_names, neg_activations):
+        n_features = layer_activation.shape[-1]  # Number of features in the feature map
+        size = layer_activation.shape[1]  # The feature map has shape (1, size, size, n_features).
+        n_cols = n_features // images_per_row  # Tiles the activation channels in this matrix
+        display_grid = np.zeros((size * n_cols, images_per_row * size))
+        for col in range(n_cols):  # Tiles each filter into a big horizontal grid
+            for row in range(images_per_row):
+                channel_image = layer_activation[0,
+                                :, :,
+                                col * images_per_row + row]
+                channel_image = (channel_image-channel_image.mean())/channel_image.std()  # Post-processes the feature to make it visually palatable
+                # channel_image /=
+                channel_image *= 64
+                channel_image += 128
+                channel_image = np.clip(channel_image, 0, 255).astype('uint8')
+                display_grid[col * size: (col + 1) * size,  # Displays the grid
+                row * size: (row + 1) * size] = channel_image
+
+        scale = 1. / size
+        plt.figure(figsize=(scale * display_grid.shape[1],
+                            scale * display_grid.shape[0]))
+        plt.title("neg_" + layer_name)
+        plt.grid(True)
+        plt.imshow(display_grid, aspect='auto', cmap='viridis')
+        plt.colorbar()
         plt.show()
 
     print("h")
@@ -449,7 +511,7 @@ def test_with_frame(full_model):
     play_video = True
     ret = None
 
-    cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/17-26-55.h264")# + filename)
+    cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/rpi12b@2018-10-07@16-21-36.mp4")# + filename) 17-26-55.h264
     while True:
         locations = []
         sub_images = None
@@ -479,14 +541,16 @@ def test_with_frame(full_model):
                     else:
                         sub_images = np.concatenate((sub_images, [frame[i:i + im_size, j:j + im_size, :]]))
                     locations.append((i, j))
-            predictions = full_model.predict(sub_images)
-            fight_predictions = np.where(predictions[:, 1] >= .9)
+            predictions = full_model.predict(sub_images).reshape(-1)
+            fight_predictions = np.where(predictions >= .5)
+            if len(fight_predictions[0]) >= 1:
+                print("jksdjlaf")
             # save all predicted fights and the surrounding context
             for idx, loc in enumerate(np.array(locations)[fight_predictions[0]]):
                 curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
                 # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
                 # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                detail_name = "17-26-55_"
+                detail_name = "12b_16-21-36_"
                 cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
                             +detail_name+"fight[%d](frame=%d).png" % (idx, frame_num),
                             curr_sub)
@@ -727,8 +791,8 @@ def main():
     # autoencode_params(params={'batch_size': 15, 'conv_1_filter': 5, 'conv_1_layers': 32, 'conv_2_filter': 5, 'conv_2_layers': 64, 'learning_rate': 0.001, 'num_epochs': 100, 'optimizer': Adam})
     # tune()
     full_model = autoencode_fully_connected(params={
-        'batch_size': 50, 'conv_1_filter': 3, 'conv_1_layers': 8,
-        'conv_2_filter': 3, 'conv_2_layers': 8, 'learning_rate': 0.0001,
+        'batch_size': 50, 'conv_1_filter': 3, 'conv_1_layers': 4,
+        'conv_2_filter': 5, 'conv_2_layers': 8, 'learning_rate': 0.0001,
         'num_epochs': 100, 'optimizer': Adam}, visualize=True)
     # test_with_frame(full_model)
 
