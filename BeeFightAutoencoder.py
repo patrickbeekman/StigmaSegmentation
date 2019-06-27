@@ -20,6 +20,7 @@ from keras.layers import Flatten, Dense, Dropout, regularizers, Conv2D, MaxPooli
 from skimage.transform import resize, rotate
 from sklearn.metrics import mean_squared_error, roc_auc_score, auc, accuracy_score
 from sklearn.model_selection import ParameterGrid
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.utils._random import sample_without_replacement
 from tensorflow.python.keras import backend
 from sklearn.utils import shuffle, class_weight
@@ -29,8 +30,13 @@ import matplotlib.pyplot as plt
 
 from video_selector import VideoSelector
 
+tot_mean = 0
+tot_std = 0
+min_max = []
+
 
 def load_data(rotate_append=False):
+    global tot_mean, tot_std, min_max
     positive = None
     negative = None
     p_test = None
@@ -82,10 +88,54 @@ def load_data(rotate_append=False):
             neg2[i] = rotate(im, angle=rot[i%3])
         negative = np.concatenate((negative, neg2))
 
-    positive = positive / 255
-    p_test = p_test / 255
-    negative = negative / 255
-    n_test = n_test / 255
+    tot_mean = np.concatenate((positive, negative)).mean(axis=0)
+    tot_std = np.concatenate((positive, negative)).mean(axis=0)
+
+    positive = ((positive - tot_mean) / tot_std)
+    p_test = ((p_test - tot_mean) / tot_std)
+    negative = ((negative - tot_mean) / tot_std)
+    n_test = ((n_test - tot_mean) / tot_std)
+
+    # compute min max scaling
+    r_min = np.concatenate((positive[:,:,:,0], negative[:,:,:,0])).min()
+    r_max = np.concatenate((positive[:,:,:,0], negative[:,:,:,0])).max()
+    g_min = np.concatenate((positive[:,:,:,1], negative[:,:,:,1])).min()
+    g_max = np.concatenate((positive[:,:,:,1], negative[:,:,:,1])).max()
+    b_min = np.concatenate((positive[:,:,:,2], negative[:,:,:,2])).min()
+    b_max = np.concatenate((positive[:,:,:,2], negative[:,:,:,2])).max()
+    min_max = [r_min, r_max, g_min, g_max, b_min, b_max]
+
+    positive[:, :, 0] = (positive[:, :, 0] - r_min) / (r_max - r_min)
+    positive[:, :, 1] = (positive[:, :, 1] - g_min) / (g_max - g_min)
+    positive[:, :, 2] = (positive[:, :, 2] - b_min) / (b_max - b_min)
+
+    p_test[:, :, 0] = ((p_test[:, :, 0] - r_min) / (r_max - r_min)).clip(0)
+    p_test[:, :, 1] = ((p_test[:, :, 1] - g_min) / (g_max - g_min)).clip(0)
+    p_test[:, :, 2] = ((p_test[:, :, 2] - b_min) / (b_max - b_min)).clip(0)
+
+    negative[:, :, 0] = (negative[:, :, 0] - r_min) / (r_max - r_min)
+    negative[:, :, 1] = (negative[:, :, 1] - g_min) / (g_max - g_min)
+    negative[:, :, 2] = (negative[:, :, 2] - b_min) / (b_max - b_min)
+
+    n_test[:, :, 0] = ((n_test[:, :, 0] - r_min) / (r_max - r_min)).clip(0)
+    n_test[:, :, 1] = ((n_test[:, :, 1] - g_min) / (g_max - g_min)).clip(0)
+    n_test[:, :, 2] = ((n_test[:, :, 2] - b_min) / (b_max - b_min)).clip(0)
+
+    # positive = positive / 255
+    # p_test = p_test / 255
+    # negative = negative / 255
+    # n_test = n_test / 255
+
+    # positive[np.where(positive > .6)] = np.random.rand(np.where(positive > .6)[0].shape[0])
+    # p_test[np.where(p_test > .6)] = np.random.rand(np.where(p_test > .6)[0].shape[0])
+    # negative[np.where(negative > .6)] = np.random.rand(np.where(negative > .6)[0].shape[0])
+    # n_test[np.where(n_test > .6)] = np.random.rand(np.where(n_test > .6)[0].shape[0])
+
+    # positive = np.expand_dims(positive, axis=3)
+    # p_test = np.expand_dims(p_test, axis=3)
+    # negative = np.expand_dims(negative, axis=3)
+    # n_test = np.expand_dims(n_test, axis=3)
+
     return positive, p_test, negative, n_test
 
 
@@ -278,7 +328,7 @@ def autoencode_params(params=None):
     plt.legend()
     plt.show()
 
-    print("accuracy:", calculate_RSS(autoencoder, pos_train, pos_test, np.concatenate((neg_test, neg_train))))
+    # print("accuracy:", calculate_RSS(autoencoder, pos_train, pos_test, np.concatenate((neg_test, neg_train))))
     return autoencoder
 
 
@@ -400,12 +450,30 @@ def autoencode_fully_connected(params, visualize=False):
 
 # heavily based on: https://github.com/gabrielpierobon/cnnshapes/blob/master/README.md
 def visualize_conv_layers(model):
+    global tot_mean, tot_std, min_max
     print("num model layers %d" % len(model.layers))
     layer_outputs = [layer.output for layer in model.layers[1:5]]#[1:]  # Extracts the outputs of the top 12 layers
     activation_model = Model(inputs=model.input, outputs=layer_outputs)  # Creates a model that will return these outputs, given the model input
 
     pos_test_img = np.array([io.imread("C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive_sm/10-50-40_fight(494,56).png")])
     neg_test_img = np.array([io.imread("C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/negative_sm/10-30-28_fight(128,261).png")])
+
+    # pos_test_img[np.where(pos_test_img > .6)] = np.random.rand(np.where(pos_test_img > .6)[0].shape[0])
+    # neg_test_img[np.where(neg_test_img > .6)] = np.random.rand(np.where(neg_test_img > .6)[0].shape[0])
+
+    pos_test_img = ((pos_test_img - tot_mean) / tot_std)
+    neg_test_img = ((neg_test_img - tot_mean) / tot_std)
+
+    pos_test_img[:, :, :, 0] = ((pos_test_img[:, :, :, 0] - min_max[0]) / (min_max[1] - min_max[0])).clip(0)
+    pos_test_img[:, :, :, 1] = ((pos_test_img[:, :, :, 1] - min_max[2]) / (min_max[3] - min_max[2])).clip(0)
+    pos_test_img[:, :, :, 2] = ((pos_test_img[:, :, :, 2] - min_max[4]) / (min_max[5] - min_max[4])).clip(0)
+
+    neg_test_img[:, :, :, 0] = ((neg_test_img[:, :, :, 0] - min_max[0]) / (min_max[1] - min_max[0])).clip(0)
+    neg_test_img[:, :, :, 1] = ((neg_test_img[:, :, :, 1] - min_max[2]) / (min_max[3] - min_max[2])).clip(0)
+    neg_test_img[:, :, :, 2] = ((neg_test_img[:, :, :, 2] - min_max[4]) / (min_max[5] - min_max[4])).clip(0)
+
+    # pos_test_img = np.expand_dims(pos_test_img, axis=3)
+    # neg_test_img = np.expand_dims(neg_test_img, axis=3)
 
     pos_activations = activation_model.predict(pos_test_img)
     neg_activations = activation_model.predict(neg_test_img)
@@ -414,35 +482,38 @@ def visualize_conv_layers(model):
     for layer in model.layers[1:5]:
         layer_names.append(layer.name)
 
-    model_weights = [(name, layer.get_weights()) for name, layer in zip(layer_names, model.layers[1:5]) if "conv2d" in name]
-
-    for layer in model_weights:
-        # num_filters = layer[1][0].shape[3]
-        colors = ['Red', "Green", "Blue"]
-        for i, c in enumerate(colors):
-            fig, ax = plt.subplots(2, 2)
-            plt.suptitle(c + "channel")
-            ax[0, 0].imshow(layer[1][0][:,:,:,0].squeeze()[:,:,i], cmap='gray') #ax[0, 0]
-            ax[0, 0].set_title(layer[0]+"_filter=0")
-            ax[0, 1].imshow(layer[1][0][:,:,:,1].squeeze()[:,:,i], cmap='gray') # ax[0, 1]
-            ax[0, 1].set_title(layer[0]+"_filter=1")
-            ax[1, 0].imshow(layer[1][0][:,:,:,2].squeeze()[:,:,i], cmap='gray') # ax[0, 2]
-            ax[1, 0].set_title(layer[0]+"_filter=2")
-            ax[1, 1].imshow(layer[1][0][:,:,:,3].squeeze()[:,:,i], cmap='gray') # ax[0, 3]
-            ax[1, 1].set_title(layer[0]+"_filter=3")
-            # ax[1, 0].imshow(layer[1][0][:,:,:,4].squeeze()[:,:,i], cmap='gray')
-            # ax[1, 0].set_title(layer[0]+"_filter=4")
-            # ax[1, 1].imshow(layer[1][0][:,:,:,5].squeeze()[:,:,i], cmap='gray')
-            # ax[1, 1].set_title(layer[0]+"_filter=5")
-            # ax[1, 2].imshow(layer[1][0][:,:,:,6].squeeze()[:,:,i], cmap='gray')
-            # ax[1, 2].set_title(layer[0]+"_filter=6")
-            # ax[1, 3].imshow(layer[1][0][:,:,:,7].squeeze()[:,:,i], cmap='gray')
-            # ax[1, 3].set_title(layer[0]+"_filter=7")
-            plt.show()
-            plt.clf()
+    # model_weights = [(name, layer.get_weights()) for name, layer in zip(layer_names, model.layers[1:5]) if "conv2d" in name]
+    #
+    # for layer in model_weights:
+    #     # num_filters = layer[1][0].shape[3]
+    #     colors = ['Red', "Green", "Blue"]
+    #     for i, c in enumerate(colors):
+    #         fig, ax = plt.subplots(2, 2)
+    #         plt.suptitle(c + "channel")
+    #         ax[0, 0].imshow(layer[1][0][:,:,:,0].squeeze()[:,:,i], cmap='gray') #ax[0, 0]
+    #         ax[0, 0].set_title(layer[0]+"_filter=0")
+    #         ax[0, 1].imshow(layer[1][0][:,:,:,1].squeeze()[:,:,i], cmap='gray') # ax[0, 1]
+    #         ax[0, 1].set_title(layer[0]+"_filter=1")
+    #         ax[1, 0].imshow(layer[1][0][:,:,:,2].squeeze()[:,:,i], cmap='gray') # ax[0, 2]
+    #         ax[1, 0].set_title(layer[0]+"_filter=2")
+    #         ax[1, 1].imshow(layer[1][0][:,:,:,3].squeeze()[:,:,i], cmap='gray') # ax[0, 3]
+    #         ax[1, 1].set_title(layer[0]+"_filter=3")
+    #         # ax[1, 0].imshow(layer[1][0][:,:,:,4].squeeze()[:,:,i], cmap='gray')
+    #         # ax[1, 0].set_title(layer[0]+"_filter=4")
+    #         # ax[1, 1].imshow(layer[1][0][:,:,:,5].squeeze()[:,:,i], cmap='gray')
+    #         # ax[1, 1].set_title(layer[0]+"_filter=5")
+    #         # ax[1, 2].imshow(layer[1][0][:,:,:,6].squeeze()[:,:,i], cmap='gray')
+    #         # ax[1, 2].set_title(layer[0]+"_filter=6")
+    #         # ax[1, 3].imshow(layer[1][0][:,:,:,7].squeeze()[:,:,i], cmap='gray')
+    #         # ax[1, 3].set_title(layer[0]+"_filter=7")
+    #         plt.show()
+    #         plt.clf()
 
     print(layer_names)
     images_per_row = 4
+
+    io.imshow(pos_test_img[0])#.reshape((40,40)), cmap='gray')
+    io.show()
 
     for layer_name, layer_activation in zip(layer_names, pos_activations):
         n_features = layer_activation.shape[-1]  # Number of features in the feature map
@@ -470,6 +541,9 @@ def visualize_conv_layers(model):
         plt.imshow(display_grid, aspect='auto', cmap='viridis')
         plt.colorbar()
         plt.show()
+
+    io.imshow(neg_test_img[0])#.reshape((40,40)), cmap='gray')
+    io.show()
 
     for layer_name, layer_activation in zip(layer_names, neg_activations):
         n_features = layer_activation.shape[-1]  # Number of features in the feature map
@@ -503,7 +577,7 @@ def visualize_conv_layers(model):
 
 
 def test_with_frame(full_model):
-
+    global tot_mean, tot_std, min_max
     # vid = VideoSelector()
     # detail_name, filename, hive = vid.download_video(type='fight')
     frame = None
@@ -524,6 +598,8 @@ def test_with_frame(full_model):
             cv2.namedWindow("fightz")
             cv2.imshow("fightz", frame)
             key = cv2.waitKey(1)
+            if frame_num < 350:
+                continue
             # if frame_num < 1100:
             #     continue
             if key == 112: # 'p'
@@ -532,7 +608,7 @@ def test_with_frame(full_model):
             # split the image into small 40x40 windows
             h, w, colors = frame.shape
             im_size = 40
-            stride = 20
+            stride = 10
             # cycle through the frame finding all (im_size X im_size) images with a stride and locations
             for i in range(0, h - im_size, stride):
                 for j in range(0, w - im_size, stride):
@@ -540,11 +616,18 @@ def test_with_frame(full_model):
                         sub_images = np.array([frame[i:i + im_size, j:j + im_size, :]])
                     else:
                         sub_images = np.concatenate((sub_images, [frame[i:i + im_size, j:j + im_size, :]]))
+
+                    # apply standardization and min-max scaling to each sub_image
+                    sub_images = ((sub_images - tot_mean) / tot_std)
+                    sub_images[:, :, :, 0] = ((sub_images[:, :, :, 0] - min_max[0]) / (min_max[1] - min_max[0])).clip(0)
+                    sub_images[:, :, :, 1] = ((sub_images[:, :, :, 1] - min_max[2]) / (min_max[3] - min_max[2])).clip(0)
+                    sub_images[:, :, :, 2] = ((sub_images[:, :, :, 2] - min_max[4]) / (min_max[5] - min_max[4])).clip(0)
+
                     locations.append((i, j))
             predictions = full_model.predict(sub_images).reshape(-1)
             fight_predictions = np.where(predictions >= .5)
             if len(fight_predictions[0]) >= 1:
-                print("jksdjlaf")
+                print("fights found at frame %d" % frame_num)
             # save all predicted fights and the surrounding context
             for idx, loc in enumerate(np.array(locations)[fight_predictions[0]]):
                 curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
@@ -794,7 +877,7 @@ def main():
         'batch_size': 50, 'conv_1_filter': 3, 'conv_1_layers': 4,
         'conv_2_filter': 5, 'conv_2_layers': 8, 'learning_rate': 0.0001,
         'num_epochs': 100, 'optimizer': Adam}, visualize=True)
-    # test_with_frame(full_model)
+    test_with_frame(full_model)
 
 
 
