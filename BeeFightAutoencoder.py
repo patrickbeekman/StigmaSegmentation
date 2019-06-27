@@ -609,6 +609,7 @@ def test_with_frame(full_model):
             h, w, colors = frame.shape
             im_size = 40
             stride = 10
+
             # cycle through the frame finding all (im_size X im_size) images with a stride and locations
             for i in range(0, h - im_size, stride):
                 for j in range(0, w - im_size, stride):
@@ -616,16 +617,14 @@ def test_with_frame(full_model):
                         sub_images = np.array([frame[i:i + im_size, j:j + im_size, :]])
                     else:
                         sub_images = np.concatenate((sub_images, [frame[i:i + im_size, j:j + im_size, :]]))
-
-                    # apply standardization and min-max scaling to each sub_image
-                    sub_images = ((sub_images - tot_mean) / tot_std)
-                    sub_images[:, :, :, 0] = ((sub_images[:, :, :, 0] - min_max[0]) / (min_max[1] - min_max[0])).clip(0)
-                    sub_images[:, :, :, 1] = ((sub_images[:, :, :, 1] - min_max[2]) / (min_max[3] - min_max[2])).clip(0)
-                    sub_images[:, :, :, 2] = ((sub_images[:, :, :, 2] - min_max[4]) / (min_max[5] - min_max[4])).clip(0)
-
                     locations.append((i, j))
+            # apply standardization and min-max scaling to each sub_image
+            sub_images = ((sub_images - tot_mean) / tot_std)
+            sub_images[:, :, :, 0] = ((sub_images[:, :, :, 0] - min_max[0]) / (min_max[1] - min_max[0])).clip(0)
+            sub_images[:, :, :, 1] = ((sub_images[:, :, :, 1] - min_max[2]) / (min_max[3] - min_max[2])).clip(0)
+            sub_images[:, :, :, 2] = ((sub_images[:, :, :, 2] - min_max[4]) / (min_max[5] - min_max[4])).clip(0)
             predictions = full_model.predict(sub_images).reshape(-1)
-            fight_predictions = np.where(predictions >= .5)
+            fight_predictions = np.where(predictions >= .1)
             if len(fight_predictions[0]) >= 1:
                 print("fights found at frame %d" % frame_num)
             # save all predicted fights and the surrounding context
