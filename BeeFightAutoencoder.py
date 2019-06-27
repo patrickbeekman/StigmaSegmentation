@@ -610,8 +610,8 @@ def test_with_frame(full_model):
             im_size = 40
             stride = 10
 
-            sub_images = [frame[i:i + im_size, j:j + im_size, :] for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)]
-            locations = [(i,j) for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)]
+            sub_images = np.array([frame[i:i + im_size, j:j + im_size, :] for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)])
+            locations = np.array([(i, j) for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)])
 
             # cycle through the frame finding all (im_size X im_size) images with a stride and locations
             # for i in range(0, h - im_size, stride):
