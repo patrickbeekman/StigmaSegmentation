@@ -6,7 +6,11 @@ To do this I have attempted using a moving window and convolutional neural netwo
 
 To start, I use a moving window of size 200x200 with a stride of 50 over the entire frame for each of the images in the dataset subset. If the center point of the moving window is inside the bounds of the ellipse then it is considered a positive example that contains the stigma, otherwise it is negative.
 
+![Autoencoder](https://imgur.com/BWRkYgU.jpg)
+
 A convolutional autoencoder is then trained with only the positive images of the stigma. It attempts to minimize the reconstruction error of the image. This encodes the representation of a squash flower stigma. After this has been trained then the decoder layers are taken out and replaced with a fully connected layer followed by a sigmoid layer for classification. It should be noted that the encoder weights are saved from the autoencoder and held fixed while the fully connected layer weights are trained. After the weights have been learned all of the weights are set trainable and the model is trained again with a small learning rate to fine tune all of the weights.
+
+![FullyConnected](https://imgur.com/nDCxAue.jpg)
 
 # Results
 More results can be viewed [here](https://imgur.com/a/VRoAtQX).
