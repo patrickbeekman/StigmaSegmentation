@@ -6,3 +6,10 @@ stigma_locations.zip
 .idea/
 __pycache__/
 *.png
+*.txt
+*.h5
+*.zip
+*.csv
+*.pkl
+*.pdf
+DataGrabber.py

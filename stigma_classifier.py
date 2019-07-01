@@ -1,6 +1,11 @@
+import cv2
+import time
+
 import numpy as np
 import pandas as pd
+from keras.losses import categorical_crossentropy
 from keras.optimizers import Adam
+from keras.utils import to_categorical
 from matplotlib import patches
 from skimage import io
 # from PIL import Image
@@ -10,8 +15,9 @@ from keras import Sequential, Input, Model
 from keras.models import load_model
 from keras.layers import Flatten, Dense, Dropout, regularizers, Conv2D, MaxPooling2D, UpSampling2D, BatchNormalization
 from skimage.color import rgb2hsv
+from skimage.draw import circle, rectangle, rectangle_perimeter, circle_perimeter
 from skimage.transform import resize
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, accuracy_score
 from tensorflow.python.keras import backend
 from sklearn.utils import shuffle, class_weight
 import tensorflow as tf
@@ -25,17 +31,22 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
 stigma_center = None
+im_size = 64
+positive, negative, p_test, n_test = None, None, None, None
 
 
 def main():
-    global stigma_center
+    global stigma_center, positive, negative, p_test, n_test
     stigma_center = pd.read_json("stigma_locations/stigma_locations.json").T
     if not os.path.isdir("data"):
         os.mkdir("data")
     # segment_images()
     # transform_data()
     # build_model()
-    build_autoencoder()
+    positive, negative, p_test, n_test = load_data()
+    # build_autoencoder()
+    full_model = autoencode_fully_connected()
+    test_model(full_model)
     # test_model()
     pass
 
@@ -249,16 +260,13 @@ def build_model():
     # plt.show()
     # plt.clf()
 
-def build_autoencoder():
-    global stigma_center
-    stop = 25
-    positive = None
-    negative = None
-    p_test = None
-    n_test = None
-    count = 0
-    im_size = 64
 
+def load_data():
+    global stigma_center, im_size, positive, negative, p_test, n_test
+    count = 0
+    stop = 8
+
+    # load the data
     for stigma in stigma_center.iterrows():
         if count > stop:
             break
@@ -269,19 +277,26 @@ def build_autoencoder():
         stigma = stigma[1]
         pos_path = 'my_stigma_locations/' + stigma.name[:stigma.name.rfind("/")] + "/positive/"
         neg_path = 'my_stigma_locations/' + stigma.name[:stigma.name.rfind("/")] + "/negative/"
-        if count <= int(stop*.93): # use samples 0-42 for training
+        if count <= int(stop*.8): # use samples 0-42 for training
             for im in os.listdir(pos_path):
                 if positive is None:
                     positive = np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])
                 else:
                     positive = np.concatenate((positive, np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])))
+            for im in np.random.choice(os.listdir(neg_path), len(os.listdir(pos_path))):
+                if negative is None:
+                    negative = np.array([resize(rgb2hsv(io.imread(neg_path + im)), output_shape=(im_size,im_size,3))])
+                else:
+                    negative = np.concatenate((negative, np.array([resize(rgb2hsv(io.imread(neg_path + im)), output_shape=(im_size,im_size,3))])))
+            if count == int(stop*.8):
+                print("-------------" * 4 + "Testing below" + "-------------" * 4)
         elif count <= stop: # use samples 43-50 for testing
             for im in os.listdir(pos_path):
                 if p_test is None:
                     p_test = np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])
                 else:
                     p_test = np.concatenate((p_test, np.array([resize(rgb2hsv(io.imread(pos_path + im)), output_shape=(im_size,im_size,3))])))
-            for im in os.listdir(neg_path):
+            for im in np.random.choice(os.listdir(neg_path), len(os.listdir(pos_path))):
                 try:
                     if n_test is None:
                         n_test = np.array([resize(rgb2hsv(io.imread(neg_path + im)), output_shape=(im_size,im_size,3))])
@@ -291,7 +306,16 @@ def build_autoencoder():
                     continue
         else: # validation
             pass
-        print("[%d] appended %s, curr size is %d" % (count-1, stigma.name, (len(positive))))
+        try:
+            print("[%d] appended %s | pos_train size:%d | neg_train:%d | pos_test:%d | neg_test:%d |" % (count-1, stigma.name, len(positive), len(negative), len(p_test), len(n_test)))
+        except TypeError:
+            print("[%d] appended %s | pos_train size:%d | neg_train:%d | pos_test:%d | neg_test:%d |" % (count-1, stigma.name, len(positive), len(negative), 0, 0))
+    return positive, negative, p_test, n_test
+
+
+def build_autoencoder():
+    global im_size, positive, negative, p_test, n_test
+    num_epochs = 60
 
     # root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive/"
     # for im in os.listdir(root_path):
@@ -331,13 +355,6 @@ def build_autoencoder():
 
     input_img = Input(shape=(im_size,im_size,3))  # adapt this if using `channels_first` image data format
 
-    # hidden_1 = Dense(4096, activation='tanh')(input_img)
-    # hidden_2 = Dense(2048, activation='tanh')(hidden_1)
-    # code = Dense(1024, activation='tanh')(hidden_2)
-    # hidden_3 = Dense(2048, activation='tanh')(code)
-    # hidden_4 = Dense(4096, activation='tanh')(hidden_3)
-    # decoded = Dense(in_out_shape, activation='sigmoid')(hidden_4)
-
     # ENCODER
     x = Conv2D(64, (7, 7), activation='tanh', padding='same')(input_img)
     x = MaxPooling2D((2, 2), padding='same')(x)
@@ -345,8 +362,6 @@ def build_autoencoder():
     x = MaxPooling2D((2, 2), padding='same')(x)
     x = Conv2D(16, (3, 3), activation='tanh', padding='same')(x)
     encoded = MaxPooling2D((2, 2), padding='same')(x)
-
-    # at this point the representation is (25,25,3)
 
     # DECODER
     x = Conv2D(16, (3, 3), activation='tanh', padding='same')(encoded)
@@ -359,139 +374,226 @@ def build_autoencoder():
 
     autoencoder = Model(input_img, decoded)
     autoencoder.compile(optimizer='adam', loss='mean_squared_error')
-
-    autoencoder.fit(positive, positive,
-                    epochs=35,
-                    batch_size=20,
-                    shuffle=True,
-                    validation_data=(p_test, p_test),
-                    verbose=2,
-                    callbacks=[TensorBoard(log_dir='/tmp/autoencoder')])
-
+    curr_t = time.gmtime()
+    train_history = autoencoder.fit(positive, positive,
+                                    epochs=num_epochs,
+                                    batch_size=20,
+                                    shuffle=True,
+                                    validation_data=(p_test, p_test),
+                                    verbose=2,
+                                    callbacks=[TensorBoard(log_dir='tmp/autoencoder_%d-%d-%d' % (curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
     autoencoder.save("data/autoencoder.h5")
     # autoencoder.load_weights("data/autoencoder.h5")
 
-    # positive_mse = mean_squared_error(positive.reshape(len(positive), -1), autoencoder.predict(positive).reshape(len(positive), -1),
-    #                                   multioutput='raw_values')
-    # # negative_mse = mean_squared_error(negative.reshape(len(negative), -1), autoencoder.predict(negative).reshape(len(negative), -1),
-    # #                                   multioutput='raw_values')
-    # p_test_mse = mean_squared_error(p_test.reshape(len(p_test), -1), autoencoder.predict(p_test).reshape(len(p_test), -1),
-    #                                   multioutput='raw_values')
-    # n_test_mse = mean_squared_error(n_test.reshape(len(n_test), -1), autoencoder.predict(n_test).reshape(len(n_test), -1),
-    #                                   multioutput='raw_values')
+    loss = train_history.history['loss']
+    val_loss = train_history.history['val_loss']
+    epochs = range(num_epochs)
+    plt.figure()
+    plt.plot(epochs, loss, 'g--', label='Training loss')
+    plt.plot(epochs, val_loss, 'm', label='Validation loss')
+    plt.title('Training and validation loss')
+    plt.legend()
+    plt.show()
+
+    print("accuracy:", calculate_RSS(autoencoder, positive, p_test, np.concatenate((n_test, negative))))
+    return autoencoder
 
 
-    '''
-    Done finding best split: Best ACC=0.72   with threshold=23.5
-    positive_acc=0.836
-    p_test_acc=0.943
-    n_test_acc=0.808
-    '''
+def autoencode_fully_connected():
+    global im_size, positive, negative, p_test, n_test
+    dense_layer_nodes = 512
+    reg = 0.0001
+    num_epochs = 100
+    autoencoder = build_autoencoder()
 
+    # pos_train, pos_test, neg_train, neg_test = load_data(rotate_append=True)
+    input_img = Input(shape=(im_size, im_size, 3))
+
+    # ENCODER
+    x = Conv2D(64, (7, 7), activation='tanh', padding='same')(input_img)
+    x = MaxPooling2D((2, 2), padding='same')(x)
+    x = Conv2D(32, (5, 5), activation='tanh', padding='same')(x)
+    x = MaxPooling2D((2, 2), padding='same')(x)
+    x = Conv2D(16, (3, 3), activation='tanh', padding='same')(x)
+    encoded = MaxPooling2D((2, 2), padding='same')(x)
+
+    flat = Flatten()(encoded)
+    den = Dense(dense_layer_nodes, activation='relu', kernel_regularizer=regularizers.l2(reg))(flat)#
+    den = Dropout(rate=.6)(den)
+    # den = Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001))(den)
+    out = Dense(2, activation='softmax')(den)
+
+    full_model = Model(input_img, out)
+    # get the weights from the pretrained model
+    for l1, l2 in zip(full_model.layers[:6], autoencoder.layers[0:6]):
+        l1.set_weights(l2.get_weights())
+    # hold them steady
+    for layer in full_model.layers[0:6]:
+        layer.trainable = False
+    # compile and train the model
+    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.0001), metrics=['accuracy'])
+    curr_t = time.gmtime()
+    train_history = full_model.fit(np.concatenate((positive, negative)), to_categorical(np.array([1]*len(positive) + [0]*len(negative)), 2),
+                                   epochs=num_epochs,
+                                   batch_size=20,
+                                   shuffle=True,
+                                   validation_data=(np.concatenate((p_test, n_test)), to_categorical(np.array([1]*len(p_test) + [0]*len(n_test)), 2)),
+                                   verbose=2,
+                                   sample_weight=None,
+                                   callbacks=[TensorBoard(log_dir='tmp/autoencoder_fully_connected[0](layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+
+    # set weights to trainable
+    for layer in full_model.layers[0:6]:
+        layer.trainable = True
+    full_model.compile(loss=categorical_crossentropy, optimizer=Adam(lr=0.0001), metrics=['accuracy'])
+    curr_t = time.gmtime()
+    train_history = full_model.fit(np.concatenate((positive, negative)), to_categorical(np.array([1]*len(positive) + [0]*len(negative)), 2),
+                                   epochs=num_epochs,
+                                   batch_size=20,
+                                   shuffle=True,
+                                   validation_data=(np.concatenate((p_test, n_test)), to_categorical(np.array([1]*len(p_test) + [0]*len(n_test)), 2)),
+                                   verbose=2,
+                                   sample_weight=None,
+                                   callbacks=[TensorBoard(log_dir='tmp/autoencoder_fully_connected[1](layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
+
+    # plot the train and validation loss
+    loss = train_history.history['loss']
+    val_loss = train_history.history['val_loss']
+    epochs = range(num_epochs)
+    plt.figure()
+    plt.plot(epochs, loss, 'g--', label='Training loss')
+    plt.plot(epochs, val_loss, 'm', label='Validation loss')
+    plt.title('Training and validation loss')
+    plt.legend()
+    plt.show()
+
+    # plot the train and validation acc
+    acc = train_history.history['acc']
+    val_acc = train_history.history['val_acc']
+    epochs = range(num_epochs)
+    plt.figure()
+    plt.plot(epochs, acc, 'g--', label='Training acc')
+    plt.plot(epochs, val_acc, 'm', label='Validation acc')
+    plt.title('Training and validation acc')
+    plt.legend()
+    plt.show()
+
+    pos_train_acc = accuracy_score(np.round(full_model.predict(positive)).astype(int), to_categorical(np.array([1] * len(positive))))
+    neg_train_acc = accuracy_score(np.round(full_model.predict(negative)).astype(int), np.flip(to_categorical(np.array([1] * len(negative))), axis=1))
+    pos_test_acc = accuracy_score(np.round(full_model.predict(p_test)).astype(int), to_categorical(np.array([1] * len(p_test))))
+    neg_test_acc = accuracy_score(np.round(full_model.predict(n_test)).astype(int), np.flip(to_categorical(np.array([1] * len(n_test))), axis=1))
+    print("pos_train:%.03f\nneg_train:%.03f\npos_test:%.03f\nneg_test:%.03f" % (pos_train_acc, neg_train_acc, pos_test_acc, neg_test_acc))
+
+    full_model.save_weights('autoencoder_classification.h5')
+    return full_model
+
+
+def calculate_RSS(autoencoder, pos_train, pos_test, neg_test):
     # Residual Sum of Squares
-    pred_pos = autoencoder.predict(positive)
-    RSS_pos = ((positive - pred_pos) ** 2).sum(axis=(1,2,3))
-    pred_p_test = autoencoder.predict(p_test)
-    RSS_p_test = ((p_test - pred_p_test) ** 2).sum(axis=(1,2,3))
-    pred_n_test = autoencoder.predict(n_test)
-    RSS_n_test = ((n_test - pred_n_test) ** 2).sum(axis=(1,2,3))
+    pred_pos = autoencoder.predict(pos_train)
+    RSS_pos = ((pos_train - pred_pos) ** 2).sum(axis=(1,2,3))
+    pred_p_test = autoencoder.predict(pos_test)
+    RSS_p_test = ((pos_test - pred_p_test) ** 2).sum(axis=(1,2,3))
+    pred_neg = autoencoder.predict(neg_test)
+    RSS_neg = ((neg_test - pred_neg) ** 2).sum(axis=(1,2,3))
 
-    print("positive", RSS_pos.mean())
-    # print("negative", negative_mse.mean())
-    print("p_test", RSS_p_test.mean())
-    print("n_test", RSS_n_test.mean())
-
+    # find the best threshold for the RSS to get the highest accuracy
+    # overall accuracy is defined as the average of the positive train and test multiplied by the negative test
     best_acc = 0
-    threshold = RSS_n_test.min()
-    for t in np.arange(int(RSS_n_test.min()), int(RSS_p_test.max()), .5):
+    best_thresh = 0
+    seperate_acc = [0,0,0]
+    thresholds = np.arange(int(RSS_neg.min()), int(RSS_p_test.max()), .5)
+    p = []
+    pt = []
+    nt = []
+    for t in thresholds:
+        p.append((RSS_pos <= t).sum() / len(RSS_pos))
+        pt.append((RSS_p_test <= t).sum() / len(RSS_p_test))
+        nt.append((RSS_neg > t).sum() / len(RSS_neg))
+
         positive_acc = (RSS_pos <= t).sum() / len(RSS_pos)
         p_test_acc = (RSS_p_test <= t).sum() / len(RSS_p_test)
-        n_test_acc = (RSS_n_test > t).sum() / len(RSS_n_test)
-        acc = (positive_acc + p_test_acc) / 2 * n_test_acc
+        n_test_acc = (RSS_neg > t).sum() / len(RSS_neg)
+
+        acc = ((positive_acc + p_test_acc) / 2) * n_test_acc
         if acc > best_acc:
             best_acc = acc
-            threshold = t
-    print("Done finding best split: Best ACC=%.02f   with threshold=%.01f" % (best_acc, threshold))
-    positive_acc = (RSS_pos <= threshold).sum() / len(RSS_pos)
-    p_test_acc = (RSS_p_test <= threshold).sum() / len(RSS_p_test)
-    n_test_acc = (RSS_n_test > threshold).sum() / len(RSS_n_test)
-    print("positive_acc=%.03f\np_test_acc=%.03f\nn_test_acc=%.03f" % (positive_acc, p_test_acc, n_test_acc))
+            best_thresh = t
+            seperate_acc = [positive_acc, p_test_acc, n_test_acc]
 
-    fig, ax = plt.subplots()
-    ax.boxplot([RSS_pos, RSS_p_test, RSS_n_test], positions=np.array(range(3))+1, labels=['positive', 'p_test', 'n_test'], meanline=True)
-    plt.title("RSS reconstruction errors: total acc=%.03f, pos=%.02f,\np_test=%.02f, n_test=%.02f, thresh=%.01f" % (best_acc, positive_acc, p_test_acc, n_test_acc, threshold))
+    print("Best calculated ACC:", best_acc, "Best thresh:", best_thresh)
+    plt.figure()
+    plt.title("Reconstruction threshold picker\n(train=%.02f, pos_test=%.02f, neg_test=%.02f)" % tuple(seperate_acc))
+    plt.plot(thresholds, p, label="pos_train_acc")
+    plt.plot(thresholds, pt, label='pos_test_acc')
+    plt.plot(thresholds, nt, label='neg_test_acc')
+    plt.plot([best_thresh, best_thresh], [0, 1], label='best found thresh')
+    plt.legend()
+    plt.xlabel("threshold")
+    plt.ylabel("accuracy")
     plt.show()
-    plt.clf()
-
-    # plt.hist(positive_mse, bins=20)
-    # plt.title("positive_mse %.02f" % positive_mse.mean())
-    # plt.show()
-    # plt.clf()
-
-    # plt.hist(negative_mse, bins=20)
-    # plt.title("negative_mse %.02f" % negative_mse.mean())
-    # plt.show()
-    # plt.clf()
-    #
-    # plt.hist(p_test_mse, bins=20)
-    # plt.title("p_test_mse %.02f" % p_test_mse.mean())
-    # plt.show()
-    # plt.clf()
-    #
-    # plt.hist(n_test_mse, bins=20)
-    # plt.title("n_test_mse %.02f" % n_test_mse.mean())
-    # plt.show()
-    # plt.clf()
+    return best_acc, seperate_acc
 
 
-def test_model():
+def test_model(full_model):
+    test_paths = [
+        'my_stigma_locations/22.06.18_0870751_pos1_kurz+lang/113MEDIA/Y0060538.jpg',
+        'my_stigma_locations/02.07.18_4982033_pos3_kurz/168MEDIA/Y0150018.jpg',
+        # 'my_stigma_locations/02.07.18_4982033_pos3_kurz/168MEDIA/Y0150474.jpg', # seen similar
+        'my_stigma_locations/19.06.18_0870751_pos1_kurz/101MEDIA/Y0030052.jpg',
+        # 'my_stigma_locations/19.06.18_0870751_pos1_kurz/101MEDIA/Y0030616.jpg', # seen similar
+        # 'my_stigma_locations/19.06.18_4982033_pos3_kurz/101MEDIA/Y0010346.jpg', # seen similar
+        # 'my_stigma_locations/19.06.18_4982033_pos3_kurz/102MEDIA/Y0010483.jpg', # seen similar
+        'my_stigma_locations/20.06.18_0870751_pos1_kurz/106MEDIA/Y0040159.jpg',
+        # 'my_stigma_locations/20.06.18_3403289_pos2_kurz/106MEDIA/Y0020183.jpg', # seen similar
+        # 'my_stigma_locations/21.06.18_0870751_pos1_kurz/109MEDIA/Y0050316.jpg', # seen similar
+        'my_stigma_locations/21.06.18_3403289_pos2_kurz/106MEDIA/Y0030737.jpg',
+        'my_stigma_locations/22.06.18_0870751_pos1_kurz+lang/115MEDIA/Y0060185.jpg',
+        'my_stigma_locations/27.06.18_4111145_pos4_kurz/159MEDIA/Y0131140.jpg',
+        'my_stigma_locations/27.06.18_4111145_pos4_kurz/159MEDIA/Y0131537.jpg',
+        'my_stigma_locations/28.06.18_1654305_pos6_kurz/170MEDIA/Y0170254.jpg',
+        # 'my_stigma_locations/28.06.18_4237688_pos5_kurz/221MEDIA/Y0210041.jpg',
+        'my_stigma_locations/29.06.18_3403289_pos2_kurz/172MEDIA/Y0170746.jpg',
+        'my_stigma_locations/30.06.18_1654305_pos6_kurz/172MEDIA/Y0180506.jpg',
+        'my_stigma_locations/30.06.18_3403289_pos2_kurz/174MEDIA/Y0181141.jpg',
+        'my_stigma_locations/01.07.18_4237688_pos5_kurz/216MEDIA/Y0190290.jpg',
+        # 'my_stigma_location/01.07.18_4237688_pos5_kurz/216MEDIA/Y0200983.jpg',
+
+    ]
+
+    print("Testing on different unseen images.")
+    for path in test_paths:
+        predict_stigma_center(full_model, path)
+
+
+def predict_stigma_center(full_model, file_path):
+    global im_size
     stride = 50
     win_size = 200
-    half_size = win_size/2
     X = None
     locations = []
-    ife = InceptionFeatureExtractor()
+    file_name = file_path[file_path.rfind("/")+1:file_path.find(".jpg")]
 
-    im = io.imread("my_stigma_locations/02.07.18_3403289_pos2_kurz/178MEDIA/Y0190578.jpg")
+    im = io.imread(file_path)
     # cycle through all 200x200 images
     for i in np.arange(0, im.shape[0] - win_size, stride):  # x direction
         for j in np.arange(0, im.shape[1] - win_size, stride):  # y direction
-            locations.append((i,j))
+            locations.append((j,i))
             if X is None:
-                X = np.array([im[i:i + win_size, j:j + win_size]])
+                X = np.array([resize(rgb2hsv(im[i:i + win_size, j:j + win_size]), output_shape=(im_size,im_size,3))])
             else:
-                X = np.concatenate((X, [im[i:i + win_size, j:j + win_size]]))
+                X = np.concatenate((X, np.array([resize(rgb2hsv(im[i:i + win_size, j:j + win_size]), output_shape=(im_size,im_size,3))])))
 
-    # Returns a compiled model identical to the previous one
-    model = load_model('data/my_model.h5')
+    results = np.round(full_model.predict(X))
+    locations = np.array(locations)
+    stigma_locs = locations[np.where(results[:,1] == 1)]
+    center_of_stigma = np.median(stigma_locs, axis=0).astype(int)#stigma_locs.mean(axis=0).astype(int)
 
-    # model.compile(optimizer=Adam(lr=0.0001),
-    #               loss='binary_crossentropy',
-    #               metrics=['accuracy', precision(), recall()])
-    y_pred = None
-    size = 200
-    for i in range(int(np.ceil(len(X)/size))):
-        if y_pred is None:
-            y_pred = model.predict(ife.transform(my_X=X[i*size:i*size+size]))
-        else:
-            y_pred = np.concatenate((y_pred, model.predict(ife.transform(my_X=X[i*size:i*size+size]))))
-
-    try:
-        stigma_location = locations[int(np.median(np.where(y_pred > .5)[0]))]
-    except ValueError:
-        stigma_location = (0, 0)
-    # plot the location as a square
-    print("stigma top left loc:", stigma_location)
-    fig, ax = plt.subplots(1)
-    ax.imshow(im)
-    for r in np.where(y_pred > .5)[0]:
-        rect = patches.Rectangle((locations[int(r)][1], locations[int(r)][0]), size, size, linewidth=3, edgecolor='r', facecolor='none')
-        ax.add_patch(rect)
-    plt.show()
-    print("hi")
-
-
-
+    image = cv2.imread(file_path)
+    calculated_center = tuple(center_of_stigma + 100)
+    print("Predicted center is (%d, %d)" % calculated_center)
+    cv2.circle(image, calculated_center, 100, thickness=5, color=(0, 255, 0))
+    cv2.imwrite("stigma_predictions/[BAD]%s_(%d, %d).png" % (file_name, calculated_center[0], calculated_center[1]), image)
 
 
 if __name__ == "__main__":
