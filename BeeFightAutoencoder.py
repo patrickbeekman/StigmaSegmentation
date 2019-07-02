@@ -183,7 +183,7 @@ def autoencode_params(params=None, data=None):
 
     curr_t = time.gmtime()
     train_history = autoencoder.fit(pos_train, pos_train,
-                                    epochs=75, # params['num_epochs']
+                                    epochs=25, # params['num_epochs']
                                     batch_size=params['batch_size'],
                                     shuffle=True,
                                     validation_data=(pos_test, pos_test),
@@ -193,7 +193,7 @@ def autoencode_params(params=None, data=None):
 
     loss = train_history.history['loss']
     val_loss = train_history.history['val_loss']
-    epochs = range(75)
+    epochs = range(25)
     plt.figure()
     plt.plot(epochs, loss, 'g--', label='Training loss')
     plt.plot(epochs, val_loss, 'm', label='Validation loss')
@@ -232,6 +232,7 @@ def autoencode_fully_connected(params, data=None, visualize=False):
     x = MaxPooling2D((2, 2), padding='same')(x)
     x = Conv2D(params['conv_2_layers'], (params['conv_2_filter'], params['conv_2_filter']), activation=params['activation'], padding='same')(x) # , kernel_regularizer=regularizers.l2(0.1)
     x = MaxPooling2D((2, 2), padding='same')(x)
+    x = BatchNormalization()(x)
 
     flat = Flatten()(x)
     den = Dropout(rate=params['dropout'])(flat)
@@ -844,7 +845,7 @@ def main():
     params = {
         'batch_size': 45, 'conv_1_filter': 3, 'conv_1_layers': 4,
         'conv_2_filter': 5, 'conv_2_layers': 8, 'learning_rate': 0.001,
-        'activation': 'tanh', 'dense_layers': 64, 'dropout': .7, 'regularization': .01,
+        'activation': 'tanh', 'dense_layers': 8, 'dropout': .6, 'regularization': .1,
         'num_epochs': 100, 'optimizer': Adam
     }
 
