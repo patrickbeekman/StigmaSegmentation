@@ -24,6 +24,7 @@ from tensorflow.python.keras.callbacks import TensorBoard
 import matplotlib.pyplot as plt
 from video_selector import VideoSelector
 
+im_size = 40
 tot_mean = None
 tot_std = None
 min_max = None
@@ -132,140 +133,6 @@ def pre_process_data(data):
     return data
 
 
-def build_autoencoder():
-    global stigma_center
-    stop = 25
-    count = 0
-    im_size = 40
-
-    # root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive_sm/"
-    # for im in os.listdir(root_path):
-    #     if positive is None:
-    #         positive = np.array([rgb2hsv(io.imread(root_path + im))])
-    #     else:
-    #         positive = np.concatenate((positive, np.array([rgb2hsv(io.imread(root_path + im))])))
-    # #positive = positive.reshape((positive.shape[0], positive.shape[1], positive.shape[2], 1))
-    #
-    # root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_testing/positive_sm/"
-    # for im in os.listdir(root_path):
-    #     if p_test is None:
-    #         p_test = np.array([rgb2hsv(io.imread(root_path + im))])
-    #     else:
-    #         p_test = np.concatenate((p_test, np.array([rgb2hsv(io.imread(root_path + im))])))
-    # #p_test = p_test.reshape((p_test.shape[0], p_test.shape[1], p_test.shape[2], 1))
-    #
-    # root_path = "C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/negative_sm/"
-    # # neg_images = os.listdir(root_path)
-    # # neg_sample = np.array(neg_images)[sample_without_replacement(len(neg_images), 1500, random_state=0)]
-    # for im in os.listdir(root_path):
-    #     if negative is None:
-    #         negative = np.array([rgb2hsv(io.imread(root_path + im))])
-    #     else:
-    #         negative = np.concatenate((negative, np.array([rgb2hsv(io.imread(root_path + im))])))
-    # # negative = negative.reshape((negative.shape[0], negative.shape[1], negative.shape[2], 1))
-    # print("positive_shape:", positive.shape)
-
-    #in_out_shape = positive.shape[1] * positive.shape[2] * positive.shape[3]
-
-    # positive = positive.astype('float32') / 255
-    # negative = negative.astype('float32') / 255
-    # p_test = p_test.astype('float32') / 255
-    # n_test = n_test.astype('float32') / 255
-    #positive = positive.reshape((len(positive), -1))
-    # p_test = p_test.reshape((len(p_test), -1))
-
-    pos_train, pos_test, neg_test = load_data()
-
-    # hidden_1 = Dense(4096, activation='tanh')(input_img)
-    # hidden_2 = Dense(2048, activation='tanh')(hidden_1)
-    # code = Dense(1024, activation='tanh')(hidden_2)
-    # hidden_3 = Dense(2048, activation='tanh')(code)
-    # hidden_4 = Dense(4096, activation='tanh')(hidden_3)
-    # decoded = Dense(in_out_shape, activation='sigmoid')(hidden_4)
-
-    input_img = Input(shape=(im_size,im_size, 3))  # adapt this if using `channels_first` image data format
-
-    # ENCODER
-    x = Conv2D(32, (5, 5), activation='tanh', padding='same')(input_img)
-    x = MaxPooling2D((2, 2), padding='same')(x)
-    x = Conv2D(16, (3, 3), activation='tanh', padding='same')(x)
-    x = MaxPooling2D((2, 2), padding='same')(x)
-    # x = Conv2D(32, (3, 3), activation='tanh', padding='same')(x)
-    # encoded = MaxPooling2D((2, 2), padding='same')(x)
-
-    # DECODER
-    # x = Conv2D(32, (3, 3), activation='tanh', padding='same')(encoded)
-    # x = UpSampling2D((2, 2))(x)
-    x = Conv2D(16, (3, 3), activation='tanh', padding='same')(x)
-    x = UpSampling2D((2, 2))(x)
-    x = Conv2D(32, (5, 5), activation='tanh', padding='same')(x)
-    x = UpSampling2D((2, 2))(x)
-    decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(x)
-
-    autoencoder = Model(input_img, decoded)
-    autoencoder.compile(optimizer='adam', loss='mean_squared_error')
-
-    autoencoder.fit(pos_train, pos_train,
-                    epochs=50,
-                    batch_size=20,
-                    shuffle=True,
-                    validation_data=(pos_test, pos_test),
-                    verbose=2,
-                    callbacks=[TensorBoard(log_dir='/tmp/autoencoder')])
-
-    autoencoder.save("data/autoencoder.h5")
-    # autoencoder.load_weights("data/autoencoder.h5")
-
-    pos_pred = autoencoder.predict(pos_train)
-    neg_pred = autoencoder.predict(neg_test)
-
-    io.imshow(pos_train[15])#.reshape((80,80)), cmap='gray')
-    io.show()
-    io.imshow(pos_pred[15])#.reshape((80,80)), cmap='gray')
-    io.show()
-    io.imshow(neg_test[15])#.reshape((80,80)), cmap='gray')
-    io.show()
-    io.imshow(neg_pred[15])#.reshape((80,80)), cmap='gray')
-    io.show()
-
-    # Residual Sum of Squares
-    pred_pos = autoencoder.predict(pos_train)
-    RSS_pos = ((pos_train - pred_pos) ** 2).sum(axis=(1,2,3))
-    pred_p_test = autoencoder.predict(pos_test)
-    RSS_p_test = ((pos_test - pred_p_test) ** 2).sum(axis=(1,2,3))
-    pred_neg = autoencoder.predict(neg_test)
-    RSS_neg = ((neg_test - pred_neg) ** 2).sum(axis=(1,2,3))
-
-    print("positive", RSS_pos.mean())
-    # print("negative", negative_mse.mean())
-    print("p_test", RSS_p_test.mean())
-    print("n_test", RSS_neg.mean())
-
-    best_acc = 0
-    threshold = RSS_neg.min()
-    for t in np.arange(int(RSS_neg.min()), int(RSS_p_test.max()), .5):
-        positive_acc = (RSS_pos <= t).sum() / len(RSS_pos)
-        p_test_acc = (RSS_p_test <= t).sum() / len(RSS_p_test)
-        n_test_acc = (RSS_neg > t).sum() / len(RSS_neg)
-        acc = (positive_acc + p_test_acc) / 2 * n_test_acc
-        if acc > best_acc:
-            best_acc = acc
-            threshold = t
-    print("Done finding best split: Best ACC=%.02f   with threshold=%.01f" % (best_acc, threshold))
-    positive_acc = (RSS_pos <= threshold).sum() / len(RSS_pos)
-    p_test_acc = (RSS_p_test <= threshold).sum() / len(RSS_p_test)
-    negative_acc = (RSS_neg > threshold).sum() / len(RSS_neg)
-    print("pos_train_acc=%.03f\npos_test_acc=%.03f\nneg_test_acc=%.03f" % (positive_acc, p_test_acc, negative_acc))
-
-    fig, ax = plt.subplots()
-    ax.boxplot([RSS_pos, RSS_p_test, RSS_neg], positions=np.array(range(3))+1, labels=['pos_train', 'pos_test', 'neg_test'], meanline=True)
-    plt.title("RSS reconstruction errors: total acc=%.03f, pos_train=%.02f,\npos_test=%.02f, neg_test=%.02f, thresh=%.01f" % (best_acc, positive_acc, p_test_acc, negative_acc, threshold))
-    plt.show()
-    plt.clf()
-
-    print("yo")
-
-
 def tune():
     pos_train, neg_train, pos_test, neg_test = load_data()
     hyper_param_tuning(pos_train, pos_test, np.concatenate((neg_test, neg_train)))
@@ -275,6 +142,7 @@ Takes as input a dictionary of parameters and then train the autoencoder.
 The weights are then saved and the training/validation loss are plotted to ensure learning.
 '''
 def autoencode_params(params=None, data=None):
+    global im_size
     if params is None:
         params = {'batch_size': 20, 'conv_1_filter': 5, 'conv_1_layers': 32, 'learning_rate': 0.01, 'num_epochs': 100, 'optimizer': Adam}
     if data is None:
@@ -285,7 +153,7 @@ def autoencode_params(params=None, data=None):
         neg_train = data[2]
         neg_test = data[3]
 
-    input_img = Input(shape=(40, 40, 3))  # adapt this if using `channels_first` image data format
+    input_img = Input(shape=(im_size, im_size, 3))  # adapt this if using `channels_first` image data format
 
     # ENCODER
     x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation=params['activation'], padding='same')(input_img)
@@ -332,7 +200,7 @@ def autoencode_params(params=None, data=None):
 
 saved_weights = None
 def autoencode_fully_connected(params, data=None, visualize=False):
-    global saved_weights
+    global saved_weights, im_size
     dense_layer_nodes = 64
     reg = 0.01
     autoencoder = autoencode_params(params, data=data)
@@ -351,7 +219,7 @@ def autoencode_fully_connected(params, data=None, visualize=False):
     X_train, y_train = shuffle(X_train, y_train)
     X_test, y_test = shuffle(X_test, y_test)
 
-    input_img = Input(shape=(40, 40, 3))
+    input_img = Input(shape=(im_size, im_size, 3))
 
     # ENCODER
     x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation=params['activation'], padding='same')(input_img) # , kernel_regularizer=regularizers.l2(0.1)
@@ -458,7 +326,8 @@ def autoencode_fully_connected(params, data=None, visualize=False):
 
 
 def get_fully_connected_model(params):
-    input_img = Input(shape=(40, 40, 3))
+    global im_size
+    input_img = Input(shape=(im_size, im_size, 3))
 
     # ENCODER
     x = Conv2D(params['conv_1_layers'], (params['conv_1_filter'], params['conv_1_filter']), activation=params['activation'], padding='same')(input_img) # , kernel_regularizer=regularizers.l2(0.1)
@@ -603,7 +472,7 @@ def visualize_conv_layers(params):
 
 
 def test_with_frame(params):
-    global tot_mean, tot_std, min_max, saved_weights
+    global tot_mean, tot_std, min_max, saved_weights, im_size
     # vid = VideoSelector()
     # detail_name, filename, hive = vid.download_video(type='fight')
     frame = None
@@ -641,7 +510,6 @@ def test_with_frame(params):
             #elif key == 115: # 's'
             # split the image into small 40x40 windows
             h, w, colors = frame.shape
-            im_size = 40
             stride = 10
 
             sub_images = np.array([frame[i:i + im_size, j:j + im_size, :] for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)])
@@ -666,23 +534,23 @@ def test_with_frame(params):
                 print("max pred is %.03f" % predictions.max())
             max_pred_loc = locations[np.argmax(predictions)]
             if predictions.max() >= .5:
-                cv2.rectangle(frame, tuple(max_pred_loc), (max_pred_loc[0]+40, max_pred_loc[1]+40), (0,255,0))
+                cv2.rectangle(frame, tuple(max_pred_loc), (max_pred_loc[0]+im_size, max_pred_loc[1]+im_size), (0,255,0))
             else:
-                cv2.rectangle(frame, tuple(max_pred_loc), (max_pred_loc[0]+40, max_pred_loc[1]+40), (255,0,0))
+                cv2.rectangle(frame, tuple(max_pred_loc), (max_pred_loc[0]+im_size, max_pred_loc[1]+im_size), (255,0,0))
             cv2.imshow("fightz", frame)
             fight_predictions = np.where(predictions >= .5)
             if len(fight_predictions[0]) >= 1:
                 print("fights found at frame %d" % frame_num)
             # save all predicted fights and the surrounding context
             for idx, loc in enumerate(np.array(locations)[fight_predictions[0]]):
-                curr_sub = frame[loc[0]:loc[0]+40, loc[1]:loc[1]+40, :]
+                curr_sub = frame[loc[0]:loc[0]+im_size, loc[1]:loc[1]+im_size, :]
                 # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
                 # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
                 detail_name = "14-06-15_"
                 cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
                             +detail_name+"fight[%d](frame=%d)pred=%.03f.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
                             curr_sub)
-                curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                curr_sub = frame[max(0,loc[0]-im_size):min(loc[0]+80, h), max(0,loc[1]-im_size):min(loc[1]+80,w), :]
                 # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
                 cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
                             +detail_name+"fight[%d](frame=%d)pred=%.03fCONTEXT.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
