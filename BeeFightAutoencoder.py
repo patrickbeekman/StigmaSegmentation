@@ -82,22 +82,27 @@ def load_data(rotate_append=False):
             neg2[i] = rotate(im, angle=rot[i%3])
         negative = np.concatenate((negative, neg2))
 
-    # calculate the means
-    tot_mean = np.concatenate((positive, negative)).mean(axis=0)
-    tot_std = np.concatenate((positive, negative)).mean(axis=0)
 
-    # compute min max scaling
-    rescaled_pos = ((positive - tot_mean) / tot_std)
-    rescaled_neg = ((negative - tot_mean) / tot_std)
-    r_min = np.concatenate((rescaled_pos[:,:,:,0], rescaled_neg[:,:,:,0])).min()
-    r_max = np.concatenate((rescaled_pos[:,:,:,0], rescaled_neg[:,:,:,0])).max()
-    g_min = np.concatenate((rescaled_pos[:,:,:,1], rescaled_neg[:,:,:,1])).min()
-    g_max = np.concatenate((rescaled_pos[:,:,:,1], rescaled_neg[:,:,:,1])).max()
-    b_min = np.concatenate((rescaled_pos[:,:,:,2], rescaled_neg[:,:,:,2])).min()
-    b_max = np.concatenate((rescaled_pos[:,:,:,2], rescaled_neg[:,:,:,2])).max()
-    min_max = [r_min, r_max, g_min, g_max, b_min, b_max]
-
-    # apply standardization and min-max scaling
+    # pos_sm = np.array([cv2.resize(p, (im_size, im_size)) for p in positive])
+    # neg_sm = np.array([cv2.resize(n, (im_size, im_size)) for n in negative])
+    # # calculate the means
+    # tot_mean = np.concatenate((pos_sm, neg_sm)).mean(axis=0)
+    # tot_std = np.concatenate((pos_sm, neg_sm)).mean(axis=0)
+    #
+    # # compute min max scaling
+    # # rescaled_pos = ((pos_sm - tot_mean) / tot_std)
+    # # rescaled_neg = ((neg_sm - tot_mean) / tot_std)
+    # rescaled_pos = pos_sm
+    # rescaled_neg = neg_sm
+    # r_min = np.concatenate((rescaled_pos[:,:,:,0], rescaled_neg[:,:,:,0])).min()
+    # r_max = np.concatenate((rescaled_pos[:,:,:,0], rescaled_neg[:,:,:,0])).max()
+    # g_min = np.concatenate((rescaled_pos[:,:,:,1], rescaled_neg[:,:,:,1])).min()
+    # g_max = np.concatenate((rescaled_pos[:,:,:,1], rescaled_neg[:,:,:,1])).max()
+    # b_min = np.concatenate((rescaled_pos[:,:,:,2], rescaled_neg[:,:,:,2])).min()
+    # b_max = np.concatenate((rescaled_pos[:,:,:,2], rescaled_neg[:,:,:,2])).max()
+    # min_max = [r_min, r_max, g_min, g_max, b_min, b_max]
+    #
+    # # apply standardization and min-max scaling
     positive = pre_process_data(positive)
     negative = pre_process_data(negative)
     p_test = pre_process_data(p_test)
@@ -123,13 +128,14 @@ def load_data(rotate_append=False):
 
 def pre_process_data(data):
     global tot_mean, tot_std, min_max
-    if tot_mean is None or tot_std is None or min_max is None:
-        raise ValueError("mean and/or standard deviation have not been calculated on the training data")
+    # if tot_mean is None or tot_std is None or min_max is None:
+    #     raise ValueError("mean and/or standard deviation have not been calculated on the training data")
 
-    data = ((data - tot_mean) / tot_std)
-    data[:, :, :, 0] = ((data[:, :, :, 0] - min_max[0]) / (min_max[1] - min_max[0])).clip(0)
-    data[:, :, :, 1] = ((data[:, :, :, 1] - min_max[2]) / (min_max[3] - min_max[2])).clip(0)
-    data[:, :, :, 2] = ((data[:, :, :, 2] - min_max[4]) / (min_max[5] - min_max[4])).clip(0)
+    data = np.array([cv2.resize(im, (im_size, im_size)) / 255 for im in data])
+    # data = ((data - tot_mean) / tot_std)
+    # data[:, :, :, 0] = np.clip(((data[:, :, :, 0] - min_max[0]) / (min_max[1] - min_max[0])), a_min=0, a_max=1)
+    # data[:, :, :, 1] = np.clip(((data[:, :, :, 1] - min_max[2]) / (min_max[3] - min_max[2])), a_min=0, a_max=1)
+    # data[:, :, :, 2] = np.clip(((data[:, :, :, 2] - min_max[4]) / (min_max[5] - min_max[4])), a_min=0, a_max=1)
     return data
 
 
@@ -181,28 +187,27 @@ def autoencode_params(params=None, data=None):
                                     batch_size=params['batch_size'],
                                     shuffle=True,
                                     validation_data=(pos_test, pos_test),
-                                    verbose=0)#,
+                                    verbose=2)#,
                                     # callbacks=[TensorBoard(log_dir='tmp/autoencoder_%d-%d-%d' % (curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
     # autoencoder.save_weights('autoencoder.h5')
 
-    # loss = train_history.history['loss']
-    # val_loss = train_history.history['val_loss']
-    # epochs = range(75)
-    # plt.figure()
-    # plt.plot(epochs, loss, 'g--', label='Training loss')
-    # plt.plot(epochs, val_loss, 'm', label='Validation loss')
-    # plt.title('Training and validation loss')
-    # plt.legend()
-    # plt.show()
+    loss = train_history.history['loss']
+    val_loss = train_history.history['val_loss']
+    epochs = range(75)
+    plt.figure()
+    plt.plot(epochs, loss, 'g--', label='Training loss')
+    plt.plot(epochs, val_loss, 'm', label='Validation loss')
+    plt.title('Training and validation loss')
+    plt.legend()
+    plt.show()
 
     # print("accuracy:", calculate_RSS(autoencoder, pos_train, pos_test, np.concatenate((neg_test, neg_train))))
     return autoencoder
 
+
 saved_weights = None
 def autoencode_fully_connected(params, data=None, visualize=False):
     global saved_weights, im_size
-    dense_layer_nodes = 64
-    reg = 0.01
     autoencoder = autoencode_params(params, data=data)
 
     if data is None:
@@ -212,6 +217,7 @@ def autoencode_fully_connected(params, data=None, visualize=False):
         pos_test = data[1]
         neg_train = data[2]
         neg_test = data[3]
+
     X_train = np.concatenate((pos_train, neg_train))
     X_test = np.concatenate((pos_test, neg_test))
     y_train = np.array([1]*len(pos_train) + [0]*len(neg_train))
@@ -246,7 +252,7 @@ def autoencode_fully_connected(params, data=None, visualize=False):
                                    epochs=params['num_epochs'],
                                    batch_size=params['batch_size'],
                                    validation_data=(X_test, y_test),
-                                   verbose=0,
+                                   verbose=2,
                                    callbacks=[
                                        # EarlyStopping(monitor='val_loss', min_delta=0.01, patience=20, mode='min', restore_best_weights=True)
                                        # TensorBoard(log_dir='tmp/[0]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))
@@ -283,7 +289,7 @@ def autoencode_fully_connected(params, data=None, visualize=False):
                                    epochs=params['num_epochs'],
                                    batch_size=params['batch_size'],
                                    validation_data=(X_test, y_test),
-                                   verbose=0,
+                                   verbose=2,
                                    callbacks=[
                                        EarlyStopping(monitor='val_loss', min_delta=0.05, patience=20, mode='min', restore_best_weights=True)
                                        # TensorBoard(log_dir='tmp/[1]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))
@@ -362,6 +368,7 @@ def visualize_conv_layers(params):
 
     pos_test_img = pre_process_data(pos_test_img)
     neg_test_img = pre_process_data(neg_test_img)
+
     # pos_test_img = ((pos_test_img - tot_mean) / tot_std)
     # neg_test_img = ((neg_test_img - tot_mean) / tot_std)
     #
@@ -835,14 +842,14 @@ def main():
     # tune()
 
     params = {
-        'batch_size': 90, 'conv_1_filter': 3, 'conv_1_layers': 4,
-        'conv_2_filter': 5, 'conv_2_layers': 8, 'learning_rate': 0.0001,
-        'activation': 'tanh', 'dense_layers': 16, 'dropout': .8, 'regularization': .1,
-        'num_epochs': 50, 'optimizer': Adam
+        'batch_size': 45, 'conv_1_filter': 3, 'conv_1_layers': 4,
+        'conv_2_filter': 5, 'conv_2_layers': 8, 'learning_rate': 0.001,
+        'activation': 'tanh', 'dense_layers': 64, 'dropout': .7, 'regularization': .01,
+        'num_epochs': 100, 'optimizer': Adam
     }
 
     full_model, accuracies = autoencode_fully_connected(params=params, visualize=False)
-    test_with_frame(params)
+    # test_with_frame(params)
 
     # full_param_tuning()
 
