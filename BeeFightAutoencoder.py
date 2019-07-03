@@ -183,17 +183,17 @@ def autoencode_params(params=None, data=None):
 
     curr_t = time.gmtime()
     train_history = autoencoder.fit(pos_train, pos_train,
-                                    epochs=25, # params['num_epochs']
+                                    epochs=30, # params['num_epochs']
                                     batch_size=params['batch_size'],
                                     shuffle=True,
                                     validation_data=(pos_test, pos_test),
-                                    verbose=2)#,
+                                    verbose=0)#,
                                     # callbacks=[TensorBoard(log_dir='tmp/autoencoder_%d-%d-%d' % (curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
     # autoencoder.save_weights('autoencoder.h5')
-
+    #
     loss = train_history.history['loss']
     val_loss = train_history.history['val_loss']
-    epochs = range(25)
+    epochs = range(30)
     plt.figure()
     plt.plot(epochs, loss, 'g--', label='Training loss')
     plt.plot(epochs, val_loss, 'm', label='Validation loss')
@@ -253,7 +253,7 @@ def autoencode_fully_connected(params, data=None, visualize=False):
                                    epochs=params['num_epochs'],
                                    batch_size=params['batch_size'],
                                    validation_data=(X_test, y_test),
-                                   verbose=2,
+                                   verbose=0,
                                    callbacks=[
                                        # EarlyStopping(monitor='val_loss', min_delta=0.01, patience=20, mode='min', restore_best_weights=True)
                                        # TensorBoard(log_dir='tmp/[0]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))
@@ -290,7 +290,7 @@ def autoencode_fully_connected(params, data=None, visualize=False):
                                    epochs=params['num_epochs'],
                                    batch_size=params['batch_size'],
                                    validation_data=(X_test, y_test),
-                                   verbose=2,
+                                   verbose=0,
                                    callbacks=[
                                        EarlyStopping(monitor='val_loss', min_delta=0.05, patience=20, mode='min', restore_best_weights=True)
                                        # TensorBoard(log_dir='tmp/[1]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))
@@ -341,6 +341,7 @@ def get_fully_connected_model(params):
     x = MaxPooling2D((2, 2), padding='same')(x)
     x = Conv2D(params['conv_2_layers'], (params['conv_2_filter'], params['conv_2_filter']), activation=params['activation'], padding='same')(x) # , kernel_regularizer=regularizers.l2(0.1)
     x = MaxPooling2D((2, 2), padding='same')(x)
+    x = BatchNormalization()(x)
 
     flat = Flatten()(x)
     den = Dropout(rate=params['dropout'])(flat)
@@ -364,7 +365,7 @@ def visualize_conv_layers(params):
     layer_outputs = [layer.output for layer in model.layers[1:5]]#[1:]  # Extracts the outputs of the top 12 layers
     activation_model = Model(inputs=model.input, outputs=layer_outputs)  # Creates a model that will return these outputs, given the model input
 
-    pos_test_img = np.array([io.imread("C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive_sm/10-50-40_fight(494,56).png")])
+    pos_test_img = np.array([io.imread("C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/positive_sm/10-35-13_fight(145,33).png")])
     neg_test_img = np.array([io.imread("C:/Users/beekmanpc/Documents/BeeCounter/all_segments_fight_training/negative_sm/14-31-18_fight(447,96).png")])
 
     pos_test_img = pre_process_data(pos_test_img)
@@ -416,7 +417,7 @@ def visualize_conv_layers(params):
     #         plt.clf()
 
     print(layer_names)
-    images_per_row = 4
+    images_per_row = 2
 
     io.imshow(pos_test_img[0])#.reshape((40,40)), cmap='gray')
     io.show()
@@ -523,47 +524,34 @@ def test_with_frame(params):
             sub_images = np.array([frame[i:i + im_size, j:j + im_size, :] for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)])
             locations = np.array([(i, j) for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)])
 
-            # cycle through the frame finding all (im_size X im_size) images with a stride and locations
-            # for i in range(0, h - im_size, stride):
-            #     for j in range(0, w - im_size, stride):
-            #         if sub_images is None:
-            #             sub_images = np.array([frame[i:i + im_size, j:j + im_size, :]])
-            #         else:
-            #             sub_images = np.concatenate((sub_images, [frame[i:i + im_size, j:j + im_size, :]]))
-            #         locations.append((i, j))
-            # apply standardization and min-max scaling to each sub_image
             sub_images = pre_process_data(sub_images)
-            # sub_images = ((sub_images - tot_mean) / tot_std)
-            # sub_images[:, :, :, 0] = ((sub_images[:, :, :, 0] - min_max[0]) / (min_max[1] - min_max[0])).clip(0)
-            # sub_images[:, :, :, 1] = ((sub_images[:, :, :, 1] - min_max[2]) / (min_max[3] - min_max[2])).clip(0)
-            # sub_images[:, :, :, 2] = ((sub_images[:, :, :, 2] - min_max[4]) / (min_max[5] - min_max[4])).clip(0)
+
             predictions = full_model.predict(sub_images).reshape(-1)
             if frame_num % 5 == 0:
                 print("max pred is %.03f" % predictions.max())
             max_pred_loc = locations[np.argmax(predictions)]
-            if predictions.max() >= .5:
-                cv2.rectangle(frame, tuple(max_pred_loc), (max_pred_loc[0]+im_size, max_pred_loc[1]+im_size), (0,255,0))
+            if predictions.max() >= .95:
+                cv2.rectangle(frame, tuple(np.flip(max_pred_loc)), (max_pred_loc[1]+im_size, max_pred_loc[0]+im_size), (0,255,0))
             else:
-                cv2.rectangle(frame, tuple(max_pred_loc), (max_pred_loc[0]+im_size, max_pred_loc[1]+im_size), (255,0,0))
+                cv2.rectangle(frame, tuple(np.flip(max_pred_loc)), (max_pred_loc[1]+im_size, max_pred_loc[0]+im_size), (255,0,0))
             cv2.imshow("fightz", frame)
-            fight_predictions = np.where(predictions >= .5)
+            fight_predictions = np.where(predictions >= .95)
             if len(fight_predictions[0]) >= 1:
-                print("fights found at frame %d" % frame_num)
-            # save all predicted fights and the surrounding context
-            for idx, loc in enumerate(np.array(locations)[fight_predictions[0]]):
-                curr_sub = frame[loc[0]:loc[0]+im_size, loc[1]:loc[1]+im_size, :]
-                # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
-                # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                detail_name = "14-06-15_"
-                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-                            +detail_name+"fight[%d](frame=%d)pred=%.03f.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
-                            curr_sub)
-                curr_sub = frame[max(0,loc[0]-im_size):min(loc[0]+80, h), max(0,loc[1]-im_size):min(loc[1]+80,w), :]
-                # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-                cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-                            +detail_name+"fight[%d](frame=%d)pred=%.03fCONTEXT.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
-                            curr_sub)
-                #break # breakout because we have collected all sub images of a frame with fights in it
+                print("%d fights found at frame %d" % (len(fight_predictions[0]), frame_num))
+            # # save all predicted fights and the surrounding context
+            # for idx, loc in enumerate(np.array(locations)[fight_predictions[0]]):
+            #     curr_sub = frame[loc[0]:loc[0]+im_size, loc[1]:loc[1]+im_size, :]
+            #     # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+            #     # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+            #     detail_name = "14-06-15_"
+            #     cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+            #                 +detail_name+"fight[%d](frame=%d)pred=%.03f.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
+            #                 curr_sub)
+            #     curr_sub = frame[max(0,loc[0]-im_size):min(loc[0]+80, h), max(0,loc[1]-im_size):min(loc[1]+80,w), :]
+            #     # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+            #     cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+            #                 +detail_name+"fight[%d](frame=%d)pred=%.03fCONTEXT.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
+            #                 curr_sub)
         else:
             cap.release()
             cv2.destroyAllWindows()
@@ -630,9 +618,9 @@ def full_param_tuning():
     best_accs = []
 
     params = {
-        'batch_size': [30, 60, 90],
-        'dense_layers': [16, 64, 128, 256],
-        'dropout': [.5, .6, .7, .8],
+        'batch_size': [15, 30, 90],
+        'dense_layers': [4, 8, 16, 32],
+        'dropout': [.6, .7, .8],
         'conv_1_layers': [2, 4, 8],
         'conv_1_filter': [3],
         'conv_2_layers': [2, 4, 8, 16],
@@ -640,7 +628,8 @@ def full_param_tuning():
         'learning_rate': [0.0001],
         'num_epochs': [100],
         'optimizer': [Adam],
-        'activation': ['tanh', 'relu']
+        'regularization': [0.1, 0.01],
+        'activation': ['tanh']
     }
 
     count = 0
@@ -843,15 +832,16 @@ def main():
     # tune()
 
     params = {
-        'batch_size': 45, 'conv_1_filter': 3, 'conv_1_layers': 4,
-        'conv_2_filter': 5, 'conv_2_layers': 8, 'learning_rate': 0.001,
-        'activation': 'tanh', 'dense_layers': 8, 'dropout': .6, 'regularization': .1,
+        'batch_size': 15, 'conv_1_filter': 3, 'conv_1_layers': 2,
+        'conv_2_filter': 3, 'conv_2_layers': 8, 'learning_rate': 0.0001,
+        'activation': 'tanh', 'dense_layers': 32, 'dropout': .7, 'regularization': .01,
         'num_epochs': 100, 'optimizer': Adam
     }
 
-    full_model, accuracies = autoencode_fully_connected(params=params, visualize=False)
-    # test_with_frame(params)
+    full_model, accuracies = autoencode_fully_connected(params=params, visualize=True)
+    test_with_frame(params)
 
+    # visualize_conv_layers(params)
     # full_param_tuning()
 
 
