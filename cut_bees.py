@@ -42,7 +42,8 @@ def cut_bees():
             if play_video:
                 ret, frame = cap.read()
             if ret:
-                frame_num += 1
+                if play_video:
+                    frame_num += 1
                 if frame_num % 100 == 0:
                     print("at frame %d" % frame_num)
                 cv2.namedWindow("fightz")

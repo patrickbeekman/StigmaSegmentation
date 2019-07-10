@@ -24,6 +24,14 @@ from tensorflow.python.keras.callbacks import TensorBoard
 import matplotlib.pyplot as plt
 from video_selector import VideoSelector
 
+# setting seeds for consistent results
+import random
+from numpy.random import seed
+from tensorflow import set_random_seed
+set_random_seed(2)
+seed(1)
+random.seed(1)
+
 im_size = 40
 tot_mean = None
 tot_std = None
@@ -108,6 +116,11 @@ def load_data(rotate_append=False):
     p_test = pre_process_data(p_test)
     n_test = pre_process_data(n_test)
 
+    positive = shuffle(positive)
+    negative = shuffle(negative)
+    p_test = shuffle(p_test)
+    n_test = shuffle(n_test)
+
     # positive = positive / 255
     # p_test = p_test / 255
     # negative = negative / 255
@@ -179,11 +192,28 @@ def autoencode_params(params=None, data=None):
     decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(x)
 
     autoencoder = Model(input_img, decoded)
+
+    # load the model with the good weights I want to use
+    other_params = {
+        'batch_size': 15, 'conv_1_filter': 3, 'conv_1_layers': 2,
+        'conv_2_filter': 3, 'conv_2_layers': 8, 'learning_rate': 0.0001,
+        'activation': 'tanh', 'dense_layers': 32, 'dropout': .7, 'regularization': .01,
+        'num_epochs': 100, 'optimizer': Adam
+    }
+    good_weights_model = get_fully_connected_model(other_params)
+    good_weights_model.load_weights('bee_curvature_seperation_weights.h5')
+    # get the weights from the pretrained model
+    for l1, l2 in zip(autoencoder.layers[1:3], good_weights_model.layers[1:3]):
+        l1.set_weights(l2.get_weights())
+    # hold the specified layers fixed
+    for layer in autoencoder.layers[1:3]:
+        layer.trainable = False
+
     autoencoder.compile(optimizer=params['optimizer'](lr=params['learning_rate']), loss='mean_squared_error')
 
     curr_t = time.gmtime()
     train_history = autoencoder.fit(pos_train, pos_train,
-                                    epochs=30, # params['num_epochs']
+                                    epochs=40, # params['num_epochs']
                                     batch_size=params['batch_size'],
                                     shuffle=True,
                                     validation_data=(pos_test, pos_test),
@@ -191,15 +221,15 @@ def autoencode_params(params=None, data=None):
                                     # callbacks=[TensorBoard(log_dir='tmp/autoencoder_%d-%d-%d' % (curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))])
     # autoencoder.save_weights('autoencoder.h5')
     #
-    loss = train_history.history['loss']
-    val_loss = train_history.history['val_loss']
-    epochs = range(30)
-    plt.figure()
-    plt.plot(epochs, loss, 'g--', label='Training loss')
-    plt.plot(epochs, val_loss, 'm', label='Validation loss')
-    plt.title('Training and validation loss')
-    plt.legend()
-    plt.show()
+    # loss = train_history.history['loss']
+    # val_loss = train_history.history['val_loss']
+    # epochs = range(40)
+    # plt.figure()
+    # plt.plot(epochs, loss, 'g--', label='Training loss')
+    # plt.plot(epochs, val_loss, 'm', label='Validation loss')
+    # plt.title('Training and validation loss')
+    # plt.legend()
+    # plt.show()
 
     # print("accuracy:", calculate_RSS(autoencoder, pos_train, pos_test, np.concatenate((neg_test, neg_train))))
     return autoencoder
@@ -259,27 +289,27 @@ def autoencode_fully_connected(params, data=None, visualize=False):
                                        # TensorBoard(log_dir='tmp/[0]autoencoder_fully_connected(layer#=%d)(reg=%.04f)_%d-%d-%d' % (dense_layer_nodes, reg, curr_t.tm_hour, curr_t.tm_min, curr_t.tm_sec))
                                    ])
 
-    # plot the train and validation loss
-    loss = train_history.history['loss']
-    val_loss = train_history.history['val_loss']
-    epochs = range(params['num_epochs'])
-    plt.figure()
-    plt.plot(epochs, loss, 'g--', label='Training loss')
-    plt.plot(epochs, val_loss, 'm', label='Validation loss')
-    plt.title('[1]Training and validation loss')
-    plt.legend()
-    plt.show()
-
-    # plot the train and validation acc
-    acc = train_history.history['acc']
-    val_acc = train_history.history['val_acc']
-    epochs = range(params['num_epochs'])
-    plt.figure()
-    plt.plot(epochs, acc, 'g--', label='Training acc')
-    plt.plot(epochs, val_acc, 'm', label='Validation acc')
-    plt.title('[1]Training and validation acc')
-    plt.legend()
-    plt.show()
+    # # plot the train and validation loss
+    # loss = train_history.history['loss']
+    # val_loss = train_history.history['val_loss']
+    # epochs = range(params['num_epochs'])
+    # plt.figure()
+    # plt.plot(epochs, loss, 'g--', label='Training loss')
+    # plt.plot(epochs, val_loss, 'm', label='Validation loss')
+    # plt.title('[1]Training and validation loss')
+    # plt.legend()
+    # plt.show()
+    #
+    # # plot the train and validation acc
+    # acc = train_history.history['acc']
+    # val_acc = train_history.history['val_acc']
+    # epochs = range(params['num_epochs'])
+    # plt.figure()
+    # plt.plot(epochs, acc, 'g--', label='Training acc')
+    # plt.plot(epochs, val_acc, 'm', label='Validation acc')
+    # plt.title('[1]Training and validation acc')
+    # plt.legend()
+    # plt.show()
 
     # make all layers trainable
     for layer in full_model.layers[0:5]:
@@ -492,13 +522,9 @@ def test_with_frame(params):
     manual_variable_initialization(True)
     full_model = get_fully_connected_model(params)
     full_model.load_weights('autoencoder_classification.h5')
-    if (saved_weights[0] == full_model.get_weights()[0]).all():
-        print("weights the same")
-    else:
-        print("weights nope")
-        raise RuntimeWarning("Model weights have not been saved properly")
 
-    cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/14-06-15.h264")# + filename) 17-26-55.h264
+    # cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/14-06-15.h264")# + filename) 17-26-55.h264
+    cap = cv2.VideoCapture("C:/Users/beekmanpc/Documents/BeeCounter/bee_videos/11-00-18.h264") # 15-56-31.h264
     while True:
         locations = []
         sub_images = None
@@ -510,8 +536,6 @@ def test_with_frame(params):
         if ret:
             cv2.namedWindow("fightz")
             key = cv2.waitKey(1)
-            if frame_num < 150:
-                continue
             # if frame_num < 1100:
             #     continue
             if key == 112: # 'p'
@@ -522,36 +546,45 @@ def test_with_frame(params):
             stride = 10
 
             sub_images = np.array([frame[i:i + im_size, j:j + im_size, :] for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)])
-            locations = np.array([(i, j) for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)])
+            locations = np.array([(j, i) for i in range(0, h - im_size, stride) for j in range(0, w - im_size, stride)])
 
             sub_images = pre_process_data(sub_images)
 
             predictions = full_model.predict(sub_images).reshape(-1)
             if frame_num % 5 == 0:
                 print("max pred is %.03f" % predictions.max())
-            max_pred_loc = locations[np.argmax(predictions)]
-            if predictions.max() >= .95:
-                cv2.rectangle(frame, tuple(np.flip(max_pred_loc)), (max_pred_loc[1]+im_size, max_pred_loc[0]+im_size), (0,255,0))
-            else:
-                cv2.rectangle(frame, tuple(np.flip(max_pred_loc)), (max_pred_loc[1]+im_size, max_pred_loc[0]+im_size), (255,0,0))
-            cv2.imshow("fightz", frame)
-            fight_predictions = np.where(predictions >= .95)
+            # max_pred_loc = locations[np.argmax(predictions)]
+            # if predictions.max() >= .95:
+            #     cv2.rectangle(frame, tuple(np.flip(max_pred_loc)), (max_pred_loc[1]+im_size, max_pred_loc[0]+im_size), (0,255,0))
+            # else:
+            #     cv2.rectangle(frame, tuple(np.flip(max_pred_loc)), (max_pred_loc[1]+im_size, max_pred_loc[0]+im_size), (255,0,0))
+            # cv2.imshow("fightz", frame)
+            fight_predictions = np.where(predictions >= .75)
             if len(fight_predictions[0]) >= 1:
                 print("%d fights found at frame %d" % (len(fight_predictions[0]), frame_num))
-            # # save all predicted fights and the surrounding context
-            # for idx, loc in enumerate(np.array(locations)[fight_predictions[0]]):
-            #     curr_sub = frame[loc[0]:loc[0]+im_size, loc[1]:loc[1]+im_size, :]
-            #     # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
-            #     # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-            #     detail_name = "14-06-15_"
-            #     cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-            #                 +detail_name+"fight[%d](frame=%d)pred=%.03f.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
-            #                 curr_sub)
-            #     curr_sub = frame[max(0,loc[0]-im_size):min(loc[0]+80, h), max(0,loc[1]-im_size):min(loc[1]+80,w), :]
-            #     # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
-            #     cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
-            #                 +detail_name+"fight[%d](frame=%d)pred=%.03fCONTEXT.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
-            #                 curr_sub)
+            # save all predicted fights and the surrounding context
+            for idx, loc in enumerate(np.array(locations)[fight_predictions[0]]):
+                if predictions[fight_predictions[0][idx]] < .85:
+                    color = (255,0,0)
+                elif predictions[fight_predictions[0][idx]] >= .85 and predictions[fight_predictions[0][idx]] < .91:
+                    color = (0,0,255)
+                else:
+                    color = (0,255,0)
+                cv2.rectangle(frame, tuple(loc), (loc[0]+im_size, loc[1]+im_size), color)
+
+                # curr_sub = frame[loc[0]:loc[0]+im_size, loc[1]:loc[1]+im_size, :]
+                # # curr_sub = frame[max(0,loc[0]-40):min(loc[0]+80, h), max(0,loc[1]-40):min(loc[1]+80,w), :]
+                # # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                # detail_name = "14-06-15_"
+                # cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                #             +detail_name+"fight[%d](frame=%d)pred=%.03f.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
+                #             curr_sub)
+                # curr_sub = frame[max(0,loc[0]-im_size):min(loc[0]+80, h), max(0,loc[1]-im_size):min(loc[1]+80,w), :]
+                # # cv2.rectangle(curr_sub, (40,40), (80,80), (0,255,0), 3)
+                # cv2.imwrite("C:/Users/beekmanpc/Documents/stigma/found_fights/"
+                #             +detail_name+"fight[%d](frame=%d)pred=%.03fCONTEXT.png" % (idx, frame_num, predictions[fight_predictions[0][idx]]),
+                #             curr_sub)
+            cv2.imshow("fightz", frame)
         else:
             cap.release()
             cv2.destroyAllWindows()
@@ -833,17 +866,63 @@ def main():
 
     params = {
         'batch_size': 15, 'conv_1_filter': 3, 'conv_1_layers': 2,
-        'conv_2_filter': 3, 'conv_2_layers': 8, 'learning_rate': 0.0001,
-        'activation': 'tanh', 'dense_layers': 32, 'dropout': .7, 'regularization': .01,
+        'conv_2_filter': 3, 'conv_2_layers': 2, 'learning_rate': 0.0001,
+        'activation': 'tanh', 'dense_layers': 8, 'dropout': .8, 'regularization': .01,
+        'num_epochs': 100, 'optimizer': Adam
+    }
+    # visualize_conv_layers(params)
+
+    full_model, accuracies = autoencode_fully_connected(params=params, visualize=False)
+    # test_with_frame(params)
+
+    # full_param_tuning()
+
+    # for _ in [0,1,2]:
+    #     varying_data_train()
+
+    # [*](074/1728) 0.911 Params: {'activation': 'tanh', 'batch_size': 15, 'conv_1_filter': 3, 'conv_1_layers': 2, 'conv_2_filter': 3, 'conv_2_layers': 8, 'dense_layers': 32, 'dropout': 0.6, 'learning_rate': 0.0001, 'num_epochs': 100, 'optimizer': <class 'keras.optimizers.Adam'>, 'regularization': 0.01}
+    # These are the parameters that I used to get the good weights where the edge of the bee is highlighted: /stigma/bee_curvature_seperation_weights.h5
+
+
+def varying_data_train():
+    pos_train, pos_test, neg_train, neg_test = load_data()
+
+    params = {
+        'batch_size': 15, 'conv_1_filter': 3, 'conv_1_layers': 2,
+        'conv_2_filter': 3, 'conv_2_layers': 4, 'learning_rate': 0.0001,
+        'activation': 'tanh', 'dense_layers': 8, 'dropout': .8, 'regularization': .01,
         'num_epochs': 100, 'optimizer': Adam
     }
 
-    full_model, accuracies = autoencode_fully_connected(params=params, visualize=True)
-    test_with_frame(params)
+    accuracies = []
+    labels = ['pos_train', 'pos_test', 'neg_train', 'neg_test']
+    percentages = np.arange(0.1, 1.1, .1)
 
-    # visualize_conv_layers(params)
-    # full_param_tuning()
+    for perc in percentages:
+        _, acc = autoencode_fully_connected(params=params, data=[
+            pos_train[0:int(len(pos_train) * perc)],
+            pos_test[0:int(len(pos_test) * perc)],
+            neg_train[0:int(len(neg_train) * perc)],
+            neg_test[0:int(len(neg_test) * perc)]])
+        accuracies.append(acc)
 
+    accuracies = np.array(accuracies)
+    avg_acc = np.mean(accuracies, axis=1)
+    for i, acc in enumerate(accuracies.T):
+        plt.plot(percentages, acc, '.-', label=labels[i])
+    plt.plot(percentages, avg_acc, '.-', label='average')
+    plt.title("accuracies as amount of data increases")
+    plt.xlabel("percent of available data used")
+    plt.ylabel("accuracy")
+    plt.legend()
+    plt.show()
+
+    variance = np.var(accuracies, axis=1)
+    plt.plot(percentages, variance, '.-')
+    plt.title("Accuracy variance of pos/neg train/test sets")
+    plt.xlabel("percent of available data")
+    plt.ylabel("variance")
+    plt.show()
 
 
 if __name__ == "__main__":
