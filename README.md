@@ -14,6 +14,8 @@ A convolutional autoencoder is then trained with only the positive images of the
 
 # Results
 More results can be viewed [here](https://imgur.com/a/VRoAtQX).
-![Flower 1](https://imgur.com/CP5knFV.jpg)
+![Flower 1](https://imgur.com/hBjTC5e.jpg)
 ![Flower 2](https://imgur.com/lj6nGmW.jpg)
-![Flower 3](https://imgur.com/3oEnWtT.jpg)
+![Flower 3](https://imgur.com/ADAxDjg.jpg)
+![Flower 4](https://imgur.com/CP5knFV.jpg)
+
